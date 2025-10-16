@@ -173,3 +173,4 @@ The GitHub Actions pipeline performs the following steps:
 ---
 
 For detailed documentation, refer to the `docs/` folder.
+# InviteLink
