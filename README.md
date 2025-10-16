@@ -58,15 +58,12 @@ At the event:
 
 ## ⚙️ Tech Stack
 
-| Area | Stack |
-|------|--------|
-| Frontend | Next.js + Tailwind CSS |
-| Backend | Next.js API Routes (Node.js) |
-| Database | Firebase Firestore or Supabase |
-| Messaging | Twilio API |
-| QR/NFC | `qrcode` npm package + mobile NFC writer |
-| Deployment | Vercel |
-| Auth | Phone-based or magic link (email) |
+|| Layer | Technology |
+|-------|-------------|
+| **Frontend** | React Native |
+| **Backend** | C# (.NET) |
+| **Database** | Azure Free Tier Database |
+| **Deployment** | GitHub Actions, Azure, Terraform |
 
 ---
 
