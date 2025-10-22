@@ -39,3 +39,6 @@
     "node": ">=20"
   }
 }
+"devDependencies": {
+    "@react-native-community/cli": "latest",
+  }
