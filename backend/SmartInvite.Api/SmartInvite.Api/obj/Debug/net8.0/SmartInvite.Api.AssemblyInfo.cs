@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SmartInvite.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0631600766843ab5adfcdd1e3ae84dada5a3b7b0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d0216355fd8331b6bc666a9597cbe61d525ab12a")]
 [assembly: System.Reflection.AssemblyProductAttribute("SmartInvite.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SmartInvite.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
