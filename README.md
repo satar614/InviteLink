@@ -70,8 +70,7 @@ At the event:
 ## 🧱 Build Plan
 
 1. **Stage 1 — Setup**
-   - Initialize Next.js app with Tailwind.
-   - Connect Firestore/Supabase.
+   - React Native
    - Add QR code generator utility.
 
 2. **Stage 2 — RSVP Flow**
