@@ -236,7 +236,7 @@ jobs:
             --set image.repository="$IMAGE_REPO" \
             --set image.tag="$IMAGE_TAG" \
             --set namespace="$NAMESPACE" \
-            --wait --timeout 5m
+            --wait --timeout 10m
 
       - name: Wait for backend load balancer IP
         id: backend_lb
@@ -276,7 +276,7 @@ jobs:
             --set image.tag="$IMAGE_TAG" \
             --set namespace="$NAMESPACE" \
             ${BACKEND_URL:+--set app.backendUrl="$BACKEND_URL"} \
-            --wait --timeout 5m
+            --wait --timeout 10m
 
       - name: Get deployment status
         if: always()
@@ -286,6 +286,15 @@ jobs:
           echo ""
           echo "=== Pods ===" 
           kubectl get pods -n ${{ needs.prepare.outputs.namespace }} || true
+
+      - name: Describe pods on failure
+        if: failure()
+        run: |
+          echo "=== Describe deployments ==="
+          kubectl describe deployment smartinvite-api -n ${{ needs.prepare.outputs.namespace }} || true
+          kubectl describe deployment invitelink-frontend -n ${{ needs.prepare.outputs.namespace }} || true
+          echo "=== Describe pods ==="
+          kubectl describe pods -n ${{ needs.prepare.outputs.namespace }} || true
 
       - name: Comment PR with service URLs
         if: github.event_name == 'pull_request'

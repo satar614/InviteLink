@@ -2,7 +2,7 @@ image:
   repository: myacr.azurecr.io/invitelink-frontend
   tag: latest
 
-replicas: 2
+replicas: 1
 namespace: main
 
 app:
