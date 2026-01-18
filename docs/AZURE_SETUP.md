@@ -98,18 +98,18 @@ Using GitHub CLI:
 
 ```bash
 # Set AZURE_CREDENTIALS
-gh secret set AZURE_CREDENTIALS --repo satar614/InviteLink < credentials.json
+gh secret set AZURE_CREDENTIALS --repo saddeaden1/InviteLink < credentials.json
 
 # Set individual secrets
-gh secret set AZURE_SUBSCRIPTION_ID --repo satar614/InviteLink
-gh secret set AZURE_CLIENT_ID --repo satar614/InviteLink
-gh secret set AZURE_TENANT_ID --repo satar614/InviteLink
-gh secret set AKS_CLUSTER_NAME --repo satar614/InviteLink
-gh secret set AKS_RESOURCE_GROUP --repo satar614/InviteLink
+gh secret set AZURE_SUBSCRIPTION_ID --repo saddeaden1/InviteLink
+gh secret set AZURE_CLIENT_ID --repo saddeaden1/InviteLink
+gh secret set AZURE_TENANT_ID --repo saddeaden1/InviteLink
+gh secret set AKS_CLUSTER_NAME --repo saddeaden1/InviteLink
+gh secret set AKS_RESOURCE_GROUP --repo saddeaden1/InviteLink
 ```
 
 Or use the GitHub web interface:
-1. Go to https://github.com/satar614/InviteLink/settings/secrets/actions
+1. Go to https://github.com/saddeaden1/InviteLink/settings/secrets/actions
 2. Click "New repository secret"
 3. Add each secret with the corresponding value
 
@@ -118,7 +118,7 @@ Or use the GitHub web interface:
 ### Check GitHub Secrets
 
 ```bash
-gh secret list --repo satar614/InviteLink
+gh secret list --repo saddeaden1/InviteLink
 ```
 
 Expected output:
@@ -140,7 +140,7 @@ git commit --allow-empty -m "test: Trigger workflows to verify Azure setup"
 git push origin sadde-work
 ```
 
-Monitor the workflow run at: https://github.com/satar614/InviteLink/actions
+Monitor the workflow run at: https://github.com/saddeaden1/InviteLink/actions
 
 ## Troubleshooting
 

@@ -25,7 +25,7 @@
 │ GITHUB.COM                                                                   │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  Repository: satar614/InviteLink                                            │
+│  Repository: saddeaden1/InviteLink                                            │
 │  ├─ Pull Requests (auto-create namespace)                                   │
 │  └─ Push to main (deploy to main namespace)                                 │
 │                                                                              │

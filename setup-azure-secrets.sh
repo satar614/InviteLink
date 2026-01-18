@@ -6,7 +6,7 @@
 set -e
 
 SUBSCRIPTION_ID="26105aab-ded4-4e66-a408-309b2e23092c"
-REPO="satar614/InviteLink"
+REPO="saddeaden1/InviteLink"
 
 echo "========================================="
 echo "Azure GitHub Secrets Setup"
