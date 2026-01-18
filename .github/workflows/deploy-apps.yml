@@ -13,14 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-backend:
-    uses: ./.github/workflows/deploy-backend.yml
-    secrets: inherit
-
-  build-frontend:
-    uses: ./.github/workflows/deploy-frontend.yml
-    secrets: inherit
-
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -41,8 +33,7 @@ jobs:
           echo "tag_suffix=${TAG_SUFFIX}" >> $GITHUB_OUTPUT
 
   deploy:
-    needs: [build-backend, build-frontend, prepare]
-    if: always()
+    needs: [prepare]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
