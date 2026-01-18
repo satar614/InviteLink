@@ -8,8 +8,12 @@ on:
   workflow_dispatch:
     inputs:
       namespace:
-        description: 'Namespace to test'
+        description: 'Kubernetes namespace to test'
         required: true
+        type: string
+      environment:
+        description: 'Environment name (dev, staging, prod)'
+        required: false
         type: string
 
 env:

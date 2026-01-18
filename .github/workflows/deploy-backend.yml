@@ -14,8 +14,17 @@ on:
   workflow_dispatch:
     inputs:
       namespace:
-        description: 'Namespace to deploy to'
+        description: 'Kubernetes namespace to deploy to'
+        required: true
+        type: string
+      environment:
+        description: 'Environment name (dev, staging, prod)'
         required: false
+        type: string
+      deployment_reason:
+        description: 'Reason for manual deployment'
+        required: false
+        type: string
 
 env:
   REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
