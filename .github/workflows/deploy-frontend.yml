@@ -80,12 +80,16 @@ jobs:
       - name: Build and push Docker image
         id: image
         run: |
-          docker login "${{ steps.acr.outputs.login_server }}" -u "${{ steps.acr.outputs.username }}" -p "${{ steps.acr.outputs.password }}"
-          
-          # Get the tag value
-          TAG="${{ steps.tag.outputs.tag }}"
           LOGIN_SERVER="${{ steps.acr.outputs.login_server }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          
+          echo "Login Server: $LOGIN_SERVER"
+          echo "Tag: $TAG"
+          
+          docker login "$LOGIN_SERVER" -u "${{ steps.acr.outputs.username }}" -p "${{ steps.acr.outputs.password }}"
+          
           IMAGE_TAG="${LOGIN_SERVER}/invitelink-frontend:${TAG}"
+          echo "Building image: $IMAGE_TAG"
           
           # Build from repo root with Dockerfile path
           docker build -f frontend/Dockerfile \
