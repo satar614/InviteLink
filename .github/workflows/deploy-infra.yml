@@ -90,37 +90,27 @@ jobs:
       - name: Reconcile Terraform state (RG/ACR/AKS)
         working-directory: ./infra
         run: |
-          set -e
-          echo "Checking existing Azure resources and reconciling state..."
+          echo "Reconciling Terraform state with Azure resources..."
           
-          # Check if RG exists first
-          RG_EXISTS=$(az group exists --name invitelink-rg --query value -o tsv 2>/dev/null || true)
+          # Always attempt to import the RG; will succeed if not in state, fail gracefully if already present
+          echo "Attempting to import resource group..."
+          terraform import -input=false azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg" || echo "RG already in state or import failed (will retry in plan)"
           
-          if [[ "$RG_EXISTS" == "true" ]]; then
-            echo "RG invitelink-rg exists in Azure. Importing to Terraform state if not already present."
-            # Import RG if not already in state
-            if ! terraform state list | grep -q 'azurerm_resource_group.hub_rg'; then
-              terraform import azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg"
-            fi
-            
-            # Check ACR existence
-            ACR_EXISTS=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query name -o tsv 2>/dev/null || true)
-            if [[ -z "$ACR_EXISTS" ]]; then
-              echo "ACR not found in Azure. Removing from Terraform state if present."
-              terraform state list | grep -q 'azurerm_container_registry.acr' && terraform state rm azurerm_container_registry.acr || true
-            fi
-
-            # Check AKS existence
-            AKS_EXISTS=$(az aks show -n invitelink-aks -g invitelink-rg --query name -o tsv 2>/dev/null || true)
-            if [[ -z "$AKS_EXISTS" ]]; then
-              echo "AKS not found in Azure. Removing from Terraform state if present."
-              terraform state list | grep -q 'azurerm_kubernetes_cluster.aks' && terraform state rm azurerm_kubernetes_cluster.aks || true
-            fi
-          else
-            echo "RG invitelink-rg does not exist in Azure. Clearing all drifted resources from state."
+          # Clean up missing resources from state
+          echo "Checking for stale resources in state..."
+          
+          # Remove ACR if it doesn't exist in Azure
+          ACR_EXISTS=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query name -o tsv 2>/dev/null || true)
+          if [[ -z "$ACR_EXISTS" ]]; then
+            echo "ACR not found in Azure. Removing from state."
             terraform state list | grep -q 'azurerm_container_registry.acr' && terraform state rm azurerm_container_registry.acr || true
+          fi
+          
+          # Remove AKS if it doesn't exist in Azure
+          AKS_EXISTS=$(az aks show -n invitelink-aks -g invitelink-rg --query name -o tsv 2>/dev/null || true)
+          if [[ -z "$AKS_EXISTS" ]]; then
+            echo "AKS not found in Azure. Removing from state."
             terraform state list | grep -q 'azurerm_kubernetes_cluster.aks' && terraform state rm azurerm_kubernetes_cluster.aks || true
-            terraform state list | grep -q 'azurerm_resource_group.hub_rg' && terraform state rm azurerm_resource_group.hub_rg || true
           fi
 
       - name: Terraform Format Check
