@@ -18,10 +18,6 @@ on:
       environment:
         description: 'Environment name (dev, staging, prod)'
         required: true
-
-concurrency:
-  group: deploy-infrastructure
-  cancel-in-progress: true
         default: 'dev'
         type: choice
         options:
@@ -53,10 +49,15 @@ concurrency:
           - centralus
           - westeurope
           - northeurope
+          - uksouth
       deployment_reason:
         description: 'Reason for manual deployment'
         required: false
         type: string
+
+concurrency:
+  group: deploy-infrastructure
+  cancel-in-progress: true
 
 env:
   TERRAFORM_VERSION: 1.5.0
