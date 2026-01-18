@@ -35,7 +35,6 @@ resource "azurerm_kubernetes_cluster" "aks" {
   location            = azurerm_resource_group.hub_rg.location
   resource_group_name = azurerm_resource_group.hub_rg.name
   dns_prefix          = "invitelink"
-  kubernetes_version  = "1.28"
 
   default_node_pool {
     name       = "default"
