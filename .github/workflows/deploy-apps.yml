@@ -324,7 +324,7 @@ jobs:
             FRONTEND_URL="pending"
           fi
 
-          BODY="### Preview environment (namespace $NAMESPACE)\n- Backend Swagger: $BACKEND_URL/\n- Frontend Home: $FRONTEND_URL/"
+          BODY="### Preview environment (namespace $NAMESPACE)\n- Backend Swagger: $BACKEND_URL/ Frontend Home: $FRONTEND_URL/"
 
           echo "Posting comment to PR #$PR_NUMBER"
           gh api repos/${{ github.repository }}/issues/$PR_NUMBER/comments -f body="$BODY"
