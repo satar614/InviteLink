@@ -18,6 +18,10 @@ on:
       environment:
         description: 'Environment name (dev, staging, prod)'
         required: true
+
+concurrency:
+  group: deploy-infrastructure
+  cancel-in-progress: true
         default: 'dev'
         type: choice
         options:
