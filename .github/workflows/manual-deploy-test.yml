@@ -57,6 +57,18 @@ jobs:
               "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
             }
 
+      - name: Get ACR Credentials
+        id: acr
+        run: |
+          ACR_NAME=$(az acr list --resource-group ${{ env.AKS_RESOURCE_GROUP }} --query '[0].name' -o tsv)
+          ACR_LOGIN_SERVER=$(az acr list --resource-group ${{ env.AKS_RESOURCE_GROUP }} --query '[0].loginServer' -o tsv)
+          ACR_USERNAME=$(az acr credential show --name "$ACR_NAME" --query 'username' -o tsv)
+          ACR_PASSWORD=$(az acr credential show --name "$ACR_NAME" --query 'passwords[0].value' -o tsv)
+          echo "::add-mask::$ACR_PASSWORD"
+          echo "login_server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+          echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+          echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+
       - name: Get AKS credentials
         run: |
           az aks get-credentials \
@@ -96,20 +108,20 @@ jobs:
 
       - name: Push backend image to ACR
         run: |
-          echo "${{ env.REGISTRY_PASSWORD }}" | docker login -u "${{ env.REGISTRY_USERNAME }}" --password-stdin ${{ env.REGISTRY_LOGIN_SERVER }}
-          docker push ${{ env.REGISTRY_LOGIN_SERVER }}/smartinvite-api:${{ steps.namespace.outputs.image_tag }}
+          echo "${{ steps.acr.outputs.password }}" | docker login -u "${{ steps.acr.outputs.username }}" --password-stdin ${{ steps.acr.outputs.login_server }}
+          docker push ${{ steps.acr.outputs.login_server }}/smartinvite-api:${{ steps.namespace.outputs.image_tag }}
           echo "✅ Pushed backend image: smartinvite-api:${{ steps.namespace.outputs.image_tag }}"
 
       - name: Build frontend Docker image
         run: |
           docker build \
-            --tag ${{ env.REGISTRY_LOGIN_SERVER }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }} \
+            --tag ${{ steps.acr.outputs.login_server }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }} \
             --file frontend/Dockerfile \
             frontend/
 
       - name: Push frontend image to ACR
         run: |
-          docker push ${{ env.REGISTRY_LOGIN_SERVER }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }}
+          docker push ${{ steps.acr.outputs.login_server }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }}
           echo "✅ Pushed frontend image: invitelink-frontend:${{ steps.namespace.outputs.image_tag }}"
 
       - name: Deploy/Update backend with Helm
@@ -117,6 +129,10 @@ jobs:
           NAMESPACE="${{ steps.namespace.outputs.namespace }}"
           IMAGE_TAG="${{ steps.namespace.outputs.image_tag }}"
           REGISTRY_URL="${{ env.REGISTRY_LOGIN_SERVER }}"
+          # Override with fetched login server to avoid missing secrets
+          if [[ -n "${{ steps.acr.outputs.login_server }}" ]]; then
+            REGISTRY_URL="${{ steps.acr.outputs.login_server }}"
+          fi
           
           if [[ "${{ steps.namespace.outputs.namespace_exists }}" == "true" ]]; then
             echo "Updating existing backend deployment..."
