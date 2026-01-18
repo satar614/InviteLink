@@ -49,18 +49,18 @@ jobs:
 
       - name: Restore backend dependencies
         if: inputs.component == 'backend'
-        working-directory: ./backend/SmartInvite.Api/SmartInvite.Api
+        working-directory: ./backend/SmartInvite.Api
         run: dotnet restore
 
       - name: Build backend
         if: inputs.component == 'backend'
-        working-directory: ./backend/SmartInvite.Api/SmartInvite.Api
+        working-directory: ./backend/SmartInvite.Api
         run: dotnet build --configuration Release --no-restore
 
       - name: Run backend unit tests
         if: inputs.component == 'backend'
         working-directory: ./backend/SmartInvite.Api.Tests
-        run: dotnet test --configuration Release --no-build --logger "trx" --results-directory "../../test-results"
+        run: dotnet test --configuration Release --logger "trx" --results-directory "../../test-results"
 
       # Frontend Build
       - name: Setup Node.js
