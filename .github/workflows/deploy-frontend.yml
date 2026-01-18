@@ -81,13 +81,19 @@ jobs:
         id: image
         run: |
           docker login "${{ steps.acr.outputs.login_server }}" -u "${{ steps.acr.outputs.username }}" -p "${{ steps.acr.outputs.password }}"
-          docker build -f ./frontend/Dockerfile \
-            -t ${{ steps.acr.outputs.login_server }}/invitelink-frontend:${{ steps.tag.outputs.tag }} \
-            ./frontend
-          docker push ${{ steps.acr.outputs.login_server }}/invitelink-frontend:${{ steps.tag.outputs.tag }}
           
-          IMAGE_URI="${{ steps.acr.outputs.login_server }}/invitelink-frontend:${{ steps.tag.outputs.tag }}"
-          echo "uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+          # Get the tag value
+          TAG="${{ steps.tag.outputs.tag }}"
+          LOGIN_SERVER="${{ steps.acr.outputs.login_server }}"
+          IMAGE_TAG="${LOGIN_SERVER}/invitelink-frontend:${TAG}"
+          
+          # Build from repo root with Dockerfile path
+          docker build -f frontend/Dockerfile \
+            -t "${IMAGE_TAG}" \
+            .
+          docker push "${IMAGE_TAG}"
+          
+          echo "uri=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
       - name: Push summary
         run: |
