@@ -60,6 +60,11 @@ env:
 jobs:
   terraform:
     runs-on: ubuntu-latest
+    env:
+      ARM_CLIENT_ID: "aa7c9b06-76d3-4dde-976a-48b8166bddb8"
+      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: "26105aab-ded4-4e66-a408-309b2e23092c"
+      ARM_TENANT_ID: "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
