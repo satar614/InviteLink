@@ -18,7 +18,12 @@ on:
       environment:
         description: 'Environment name (dev, staging, prod)'
         required: true
-        type: string
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
       action:
         description: 'Terraform action (plan, apply, destroy)'
         required: false
@@ -28,6 +33,26 @@ on:
           - plan
           - apply
           - destroy
+      resource_group:
+        description: 'Azure Resource Group name'
+        required: false
+        default: 'invitelink-rg'
+        type: string
+      location:
+        description: 'Azure Region'
+        required: false
+        default: 'eastus'
+        type: choice
+        options:
+          - eastus
+          - westus
+          - centralus
+          - westeurope
+          - northeurope
+      deployment_reason:
+        description: 'Reason for manual deployment'
+        required: false
+        type: string
 
 env:
   TERRAFORM_VERSION: 1.5.0
@@ -66,15 +91,33 @@ jobs:
 
       - name: Terraform Plan
         working-directory: ./infra
-        run: terraform plan -out=tfplan
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual deployment triggered"
+            echo "Environment: ${{ inputs.environment }}"
+            echo "Action: ${{ inputs.action }}"
+            echo "Resource Group: ${{ inputs.resource_group }}"
+            echo "Location: ${{ inputs.location }}"
+            echo "Reason: ${{ inputs.deployment_reason }}"
+          fi
+          terraform plan -out=tfplan
 
       - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: |
+          (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
         working-directory: ./infra
         run: terraform apply -auto-approve tfplan
 
+      - name: Terraform Destroy
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+        working-directory: ./infra
+        run: terraform destroy -auto-approve
+
       - name: Get Outputs
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: |
+          (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
         working-directory: ./infra
         run: |
           terraform output -json > /tmp/tf-outputs.json
