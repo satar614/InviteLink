@@ -112,10 +112,21 @@ jobs:
             echo "Location: ${{ inputs.location }}"
             echo "Reason: ${{ inputs.deployment_reason }}"
           fi
+          
+          # Check if ACR already exists, use existing name, otherwise generate new
+          EXISTING_ACR=$(az acr list --resource-group "${{ inputs.resource_group || 'invitelink-rg' }}" --query '[0].name' -o tsv 2>/dev/null || echo "")
+          if [ -n "$EXISTING_ACR" ]; then
+            ACR_NAME="$EXISTING_ACR"
+            echo "Using existing ACR: $ACR_NAME"
+          else
+            ACR_NAME="invitelinkacr$(echo $RANDOM | md5sum | head -c 8)"
+            echo "Generating new ACR name: $ACR_NAME"
+          fi
+          
           terraform plan \
             -input=false \
             -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
-            -var="acr_name=invitelinkacr$(echo $RANDOM | md5sum | head -c 8)" \
+            -var="acr_name=$ACR_NAME" \
             -var="resource_group_name=${{ inputs.resource_group || 'invitelink-rg' }}" \
             -var="location=${{ inputs.location || 'eastus' }}" \
             -out=tfplan
