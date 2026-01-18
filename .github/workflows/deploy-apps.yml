@@ -25,20 +25,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       namespace: ${{ steps.setup.outputs.namespace }}
+      tag_suffix: ${{ steps.setup.outputs.tag_suffix }}
     steps:
-      - name: Determine namespace
+      - name: Determine namespace and tag
         id: setup
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             NAMESPACE="pr-${{ github.event.pull_request.number }}"
+            TAG_SUFFIX="pr-${{ github.event.pull_request.number }}"
           else
             NAMESPACE="main"
+            TAG_SUFFIX="main"
           fi
           echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "tag_suffix=${TAG_SUFFIX}" >> $GITHUB_OUTPUT
 
   deploy:
     needs: [build-backend, build-frontend, prepare]
-    if: success()
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -54,6 +58,64 @@ jobs:
               "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
               "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
             }
+
+      - name: Fetch latest backend image from ACR
+        id: backend_image
+        run: |
+          ACR_NAME="invitelinkacre9c72f7a"
+          REPO="smartinvite-api"
+          TAG_PREFIX="${{ needs.prepare.outputs.tag_suffix }}"
+          
+          echo "Looking for latest backend image with tag prefix: $TAG_PREFIX"
+          
+          # Try to find the tag - look for tags starting with the prefix, get the most recent
+          MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+            --orderby time_desc --query "[?starts_with(@, '$TAG_PREFIX')] | [0]" -o tsv 2>/dev/null || echo "")
+          
+          # Fallback to main if no PR tag found
+          if [[ -z "$MATCHING_TAG" && "$TAG_PREFIX" != "main" ]]; then
+            echo "No PR tag found, falling back to main image"
+            MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+              --orderby time_desc --query "[?starts_with(@, 'main')] | [0]" -o tsv 2>/dev/null || echo "")
+          fi
+          
+          if [[ -z "$MATCHING_TAG" ]]; then
+            echo "ERROR: No image tag found for $REPO"
+            exit 1
+          fi
+          
+          IMAGE="${ACR_NAME}.azurecr.io/${REPO}:${MATCHING_TAG}"
+          echo "Backend image: $IMAGE"
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+
+      - name: Fetch latest frontend image from ACR
+        id: frontend_image
+        run: |
+          ACR_NAME="invitelinkacre9c72f7a"
+          REPO="invitelink-frontend"
+          TAG_PREFIX="${{ needs.prepare.outputs.tag_suffix }}"
+          
+          echo "Looking for latest frontend image with tag prefix: $TAG_PREFIX"
+          
+          # Try to find the tag - look for tags starting with the prefix, get the most recent
+          MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+            --orderby time_desc --query "[?starts_with(@, '$TAG_PREFIX')] | [0]" -o tsv 2>/dev/null || echo "")
+          
+          # Fallback to main if no PR tag found
+          if [[ -z "$MATCHING_TAG" && "$TAG_PREFIX" != "main" ]]; then
+            echo "No PR tag found, falling back to main image"
+            MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+              --orderby time_desc --query "[?starts_with(@, 'main')] | [0]" -o tsv 2>/dev/null || echo "")
+          fi
+          
+          if [[ -z "$MATCHING_TAG" ]]; then
+            echo "ERROR: No image tag found for $REPO"
+            exit 1
+          fi
+          
+          IMAGE="${ACR_NAME}.azurecr.io/${REPO}:${MATCHING_TAG}"
+          echo "Frontend image: $IMAGE"
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
 
       - name: Get AKS credentials
         run: |
@@ -71,11 +133,11 @@ jobs:
 
       - name: Deploy backend with Helm
         run: |
-          IMAGE_URI="${{ needs.build-backend.outputs.image_uri }}"
-          IMAGE_REPO="${IMAGE_URI%:*}"
-          IMAGE_TAG="${IMAGE_URI##*:}"
+          IMAGE="${{ steps.backend_image.outputs.image }}"
+          IMAGE_REPO="${IMAGE%:*}"
+          IMAGE_TAG="${IMAGE##*:}"
           
-          echo "Deploying backend with image: $IMAGE_REPO:$IMAGE_TAG"
+          echo "Deploying backend: $IMAGE_REPO:$IMAGE_TAG"
           helm upgrade --install smartinvite-api ./k8s/charts/backend \
             --namespace ${{ needs.prepare.outputs.namespace }} \
             --set image.repository="$IMAGE_REPO" \
@@ -84,11 +146,11 @@ jobs:
 
       - name: Deploy frontend with Helm
         run: |
-          IMAGE_URI="${{ needs.build-frontend.outputs.image_uri }}"
-          IMAGE_REPO="${IMAGE_URI%:*}"
-          IMAGE_TAG="${IMAGE_URI##*:}"
+          IMAGE="${{ steps.frontend_image.outputs.image }}"
+          IMAGE_REPO="${IMAGE%:*}"
+          IMAGE_TAG="${IMAGE##*:}"
           
-          echo "Deploying frontend with image: $IMAGE_REPO:$IMAGE_TAG"
+          echo "Deploying frontend: $IMAGE_REPO:$IMAGE_TAG"
           helm upgrade --install invitelink-frontend ./k8s/charts/frontend \
             --namespace ${{ needs.prepare.outputs.namespace }} \
             --set image.repository="$IMAGE_REPO" \
@@ -110,5 +172,5 @@ jobs:
           echo "## ✅ Applications Deployed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Namespace**: \`${{ needs.prepare.outputs.namespace }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Backend Image**: \`${{ needs.build-backend.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Frontend Image**: \`${{ needs.build-frontend.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Backend Image**: \`${{ steps.backend_image.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Frontend Image**: \`${{ steps.frontend_image.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
