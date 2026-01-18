@@ -3,27 +3,6 @@ provider "azurerm" {
   subscription_id = var.subscription_id
 }
 
-provider "kubernetes" {
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  
-  # Use placeholder values - will be configured properly once AKS is in state
-  host                   = "https://kubernetes.default.svc"
-  client_certificate     = ""
-  client_key             = ""
-  cluster_ca_certificate = ""
-}
-
-provider "helm" {
-  # Use placeholder values - will be configured properly once AKS is in state
-  kubernetes {
-    host                   = "https://kubernetes.default.svc"
-    client_certificate     = ""
-    client_key             = ""
-    cluster_ca_certificate = ""
-  }
-}
-
 resource "azurerm_resource_group" "hub_rg" {
   name     = var.resource_group_name
   location = var.location
@@ -37,7 +16,6 @@ resource "azurerm_container_registry" "acr" {
   admin_enabled       = true
 }
 
-# AKS Cluster
 resource "azurerm_kubernetes_cluster" "aks" {
   name                = "invitelink-aks"
   location            = azurerm_resource_group.hub_rg.location
@@ -57,30 +35,4 @@ resource "azurerm_kubernetes_cluster" "aks" {
   network_profile {
     network_plugin = "azure"
   }
-}
-
-# Helm Release - Backend
-resource "helm_release" "backend" {
-  name       = "invitelink-backend"
-  chart      = "${path.module}/../k8s/charts/backend"
-  namespace  = "default"
-
-  values = [
-    file("${path.module}/../k8s/charts/backend/values.yaml")
-  ]
-
-  depends_on = [azurerm_kubernetes_cluster.aks]
-}
-
-# Helm Release - Frontend
-resource "helm_release" "frontend" {
-  name       = "invitelink-frontend"
-  chart      = "${path.module}/../k8s/charts/frontend"
-  namespace  = "default"
-
-  values = [
-    file("${path.module}/../k8s/charts/frontend/values.yaml")
-  ]
-
-  depends_on = [azurerm_kubernetes_cluster.aks]
 }
