@@ -2,10 +2,12 @@
 FROM node:18-alpine AS build
 WORKDIR /app
 
-COPY package*.json ./
+# Copy package files from frontend directory (when building from repo root)
+COPY frontend/package*.json ./
 RUN npm ci
 
-COPY . ./
+# Copy frontend source
+COPY frontend/ ./
 RUN npm run build || echo "No build step, using source"
 
 # Runtime stage
