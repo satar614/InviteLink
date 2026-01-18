@@ -12,6 +12,7 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/deploy-frontend.yml'
+  workflow_call:
   workflow_dispatch:
     inputs:
       tag_suffix:
