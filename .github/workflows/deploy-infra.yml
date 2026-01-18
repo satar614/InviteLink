@@ -121,6 +121,10 @@ jobs:
             -out=tfplan
 
       - name: Terraform Apply
+        # Temporarily disabled for testing - uncomment to restrict to main branch only
+        # if: |
+        #   (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+        #   (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
         working-directory: ./infra
         run: terraform apply -input=false -auto-approve tfplan
 
