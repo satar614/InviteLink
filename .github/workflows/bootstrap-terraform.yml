@@ -16,7 +16,7 @@ on:
       location:
         description: 'Azure Region'
         required: false
-        default: 'eastus'
+        default: 'uksouth'
         type: choice
         options:
           - eastus
