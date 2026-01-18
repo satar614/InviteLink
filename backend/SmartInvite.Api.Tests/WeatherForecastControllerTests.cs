@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Xunit;
 using FluentAssertions;
 using SmartInvite.Api.Controllers;
