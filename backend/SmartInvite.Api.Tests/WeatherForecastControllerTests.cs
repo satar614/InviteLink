@@ -69,7 +69,7 @@ namespace SmartInvite.Api.Tests.Controllers
             // Assert
             result.Should().AllSatisfy(forecast =>
             {
-                forecast.Date.Should().BeGreaterThanOrEqualTo(DateTime.Now.Date);
+                forecast.Date.CompareTo(DateOnly.FromDateTime(DateTime.Now)).Should().BeGreaterThanOrEqualTo(0);
             });
         }
 

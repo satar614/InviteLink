@@ -23,7 +23,7 @@ describe('QR Code Scanning', () => {
 
   it('should have valid allowed guests count', () => {
     expect(mockQRData.allowedGuests).toBeGreaterThan(0);
-    expect(mockQRData.allowedGuests).toBeLessThanOrEqualTo(10) as any;
+    expect(mockQRData.allowedGuests <= 10).toBe(true);
   });
 
   it('should link to event', () => {

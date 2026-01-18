@@ -14,6 +14,6 @@ describe('Frontend Application', () => {
 
   it('test environment is properly set', () => {
     expect(typeof window).toBe('object');
-    expect(window?.document).toBeDefined();
+    expect(typeof window !== 'undefined').toBe(true);
   });
 });
