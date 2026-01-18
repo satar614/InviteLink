@@ -29,6 +29,9 @@ on:
 concurrency:
   group: deploy-frontend
   cancel-in-progress: true
+
+env:
+  REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
   REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
   REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
   AKS_CLUSTER_NAME: invitelink-aks
