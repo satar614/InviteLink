@@ -23,6 +23,11 @@ spec:
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
+      {{- if .Values.app.backendUrl }}
+        env:
+        - name: BACKEND_URL
+          value: "{{ .Values.app.backendUrl }}"
+      {{- end }}
         livenessProbe:
           httpGet:
             path: /health/live

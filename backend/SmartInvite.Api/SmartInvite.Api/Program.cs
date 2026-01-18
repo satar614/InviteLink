@@ -11,14 +11,13 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Configure the HTTP request pipeline (Swagger always on for preview envs)
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseHttpsRedirection();
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "SmartInvite API v1");
+    c.RoutePrefix = string.Empty; // serve Swagger UI at root for easy access
+});
 
 app.UseAuthorization();
 

@@ -4,3 +4,6 @@ image:
 
 replicas: 2
 namespace: main
+
+app:
+  backendUrl: ""
