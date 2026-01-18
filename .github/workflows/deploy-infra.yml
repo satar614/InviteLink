@@ -91,42 +91,6 @@ jobs:
         working-directory: ./infra
         run: terraform init
 
-      - name: Check for existing resources
-        working-directory: ./infra
-        run: |
-          echo "Checking if Azure resources already exist..."
-          RG_EXISTS=$(az group exists -n invitelink-rg 2>/dev/null || echo "false")
-          echo "Resource group exists: $RG_EXISTS"
-          
-          if [[ "$RG_EXISTS" == "true" ]]; then
-            echo "Existing resources detected. Running state reconciliation..."
-            
-            # Define terraform variables for import commands
-            TF_VARS="-var=subscription_id=$ARM_SUBSCRIPTION_ID -var=acr_name=invitelinkacre9c72f7a -var=resource_group_name=invitelink-rg -var=location=uksouth"
-            
-            # Import RG
-            echo "Importing resource group..."
-            terraform import $TF_VARS -input=false azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg" 2>&1 || true
-            
-            # Import ACR if it exists
-            ACR_ID=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
-            if [[ ! -z "$ACR_ID" ]]; then
-              echo "Importing container registry..."
-              terraform import $TF_VARS -input=false azurerm_container_registry.acr "$ACR_ID" 2>&1 || true
-            fi
-            
-            # Import AKS if it exists
-            AKS_ID=$(az aks show -n invitelink-aks -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
-            if [[ ! -z "$AKS_ID" ]]; then
-              echo "Importing Kubernetes cluster..."
-              AKS_ID=$(echo "$AKS_ID" | sed 's|/resourcegroups/|/resourceGroups/|i')
-              terraform import $TF_VARS -input=false azurerm_kubernetes_cluster.aks "$AKS_ID" 2>&1 || true
-            fi
-          else
-            echo "No existing resources found. Terraform will create fresh deployment."
-          fi
-          set +e
-
       - name: Terraform Format Check
         working-directory: ./infra
         run: terraform fmt -check
