@@ -13,7 +13,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  wait-for-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for backend and frontend builds to complete
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Checking for running backend/frontend builds..."
+          
+          # Wait for backend builds
+          while true; do
+            BACKEND_RUNS=$(gh run list \
+              --repo ${{ github.repository }} \
+              --workflow "Build and Push to ACR" \
+              --json status,databaseId,displayTitle \
+              --jq '[.[] | select(.displayTitle | contains("Backend")) | select(.status == "in_progress" or .status == "queued")] | length')
+            
+            if [[ "$BACKEND_RUNS" -eq 0 ]]; then
+              echo "No backend builds running"
+              break
+            fi
+            echo "Waiting for $BACKEND_RUNS backend build(s) to complete..."
+            sleep 10
+          done
+          
+          # Wait for frontend builds
+          while true; do
+            FRONTEND_RUNS=$(gh run list \
+              --repo ${{ github.repository }} \
+              --workflow "Build and Push to ACR" \
+              --json status,databaseId,displayTitle \
+              --jq '[.[] | select(.displayTitle | contains("Frontend")) | select(.status == "in_progress" or .status == "queued")] | length')
+            
+            if [[ "$FRONTEND_RUNS" -eq 0 ]]; then
+              echo "No frontend builds running"
+              break
+            fi
+            echo "Waiting for $FRONTEND_RUNS frontend build(s) to complete..."
+            sleep 10
+          done
+          
+          echo "All builds complete, proceeding with deployment"
+
   prepare:
+    needs: [wait-for-builds]
     runs-on: ubuntu-latest
     outputs:
       namespace: ${{ steps.setup.outputs.namespace }}
