@@ -30,8 +30,8 @@ env:
   REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
   REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
   REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
-  AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
-  AKS_RESOURCE_GROUP: ${{ secrets.AKS_RESOURCE_GROUP }}
+  AKS_CLUSTER_NAME: invitelink-aks
+  AKS_RESOURCE_GROUP: invitelink-rg
 
 jobs:
   deploy:
