@@ -57,7 +57,7 @@ on:
 
 concurrency:
   group: deploy-infrastructure
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   TERRAFORM_VERSION: 1.5.0

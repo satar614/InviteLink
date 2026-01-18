@@ -26,8 +26,9 @@ on:
         required: false
         type: string
 
-env:
-  REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: true
   REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
   REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
   AKS_CLUSTER_NAME: invitelink-aks
