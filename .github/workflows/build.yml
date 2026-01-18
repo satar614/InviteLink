@@ -151,13 +151,27 @@ jobs:
               "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
             }
 
+      - name: Get ACR credentials
+        if: inputs.push_image == true
+        id: acr_creds
+        run: |
+          ACR_NAME=$(az acr list --resource-group invitelink-rg --query '[0].name' -o tsv)
+          ACR_LOGIN_SERVER=$(az acr list --resource-group invitelink-rg --query '[0].loginServer' -o tsv)
+          ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query 'username' -o tsv)
+          ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query 'passwords[0].value' -o tsv)
+          
+          echo "::add-mask::$ACR_PASSWORD"
+          echo "login_server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+          echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+          echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+
       - name: Docker login
         if: inputs.push_image == true
         uses: azure/docker-login@v1
         with:
-          login-server: ${{ env.REGISTRY_LOGIN_SERVER }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ env.REGISTRY_PASSWORD }}
+          login-server: ${{ steps.acr_creds.outputs.login_server }}
+          username: ${{ steps.acr_creds.outputs.username }}
+          password: ${{ steps.acr_creds.outputs.password }}
 
       - name: Build Docker image
         if: inputs.push_image == true
@@ -165,7 +179,7 @@ jobs:
           docker build \
             -f ${{ steps.setup.outputs.dockerfile_path }} \
             -t ${{ steps.setup.outputs.image_uri }} \
-            -t ${{ env.REGISTRY_LOGIN_SERVER }}/${{ steps.setup.outputs.image_name }}:latest \
+            -t ${{ steps.acr_creds.outputs.login_server }}/${{ steps.setup.outputs.image_name }}:latest \
             ${{ steps.setup.outputs.build_context }}
 
       - name: Push Docker image
