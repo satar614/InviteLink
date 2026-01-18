@@ -1,40 +1,28 @@
 name: Deploy Applications
-
-run-name: Deploy Applications - ${{ github.event_name == 'pull_request' && github.event.pull_request.title || github.ref_name }}
+run-name: Deploy Applications - ${{ github.event.pull_request.title || github.ref_name }}
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'k8s/**'
-      - '.github/workflows/deploy-apps.yml'
   pull_request:
-    branches:
-      - main
-    paths:
-      - 'k8s/**'
-      - '.github/workflows/deploy-apps.yml'
 
-env:
-  REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-  REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
-  REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
-  AKS_CLUSTER_NAME: invitelink-aks
-  AKS_RESOURCE_GROUP: invitelink-rg
+concurrency:
+  group: deploy-apps
+  cancel-in-progress: true
 
 jobs:
-  # Determine namespace
+  build-backend:
+    uses: ./.github/workflows/deploy-backend.yml
+    secrets: inherit
+
+  build-frontend:
+    uses: ./.github/workflows/deploy-frontend.yml
+    secrets: inherit
+
   prepare:
     runs-on: ubuntu-latest
     outputs:
       namespace: ${{ steps.setup.outputs.namespace }}
-      namespace_exists: ${{ steps.check.outputs.exists }}
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Determine namespace
         id: setup
         run: |
@@ -45,45 +33,10 @@ jobs:
           fi
           echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
 
-      - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: |
-            {
-              "clientId": "aa7c9b06-76d3-4dde-976a-48b8166bddb8",
-              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
-              "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
-            }
-
-      - name: Check if namespace exists
-        id: check
-        run: |
-          az aks get-credentials \
-            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
-            --name ${{ env.AKS_CLUSTER_NAME }} \
-            --overwrite-existing
-          
-          if kubectl get namespace ${{ steps.setup.outputs.namespace }} >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-  # Build and push images to ACR (standalone, can be called independently)
-  build-and-push:
-    needs: prepare
-    uses: ./.github/workflows/build-push.yml
-    with:
-      namespace: ${{ needs.prepare.outputs.namespace }}
-    secrets: inherit
-
-  # Deploy to Kubernetes namespace (after images are in ACR)
   deploy:
-    needs: [ prepare, build-and-push ]
-    if: always() && needs.build-and-push.result == 'success'
+    needs: [build-backend, build-frontend, prepare]
+    if: success()
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -102,115 +55,47 @@ jobs:
       - name: Get AKS credentials
         run: |
           az aks get-credentials \
-            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
-            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --resource-group invitelink-rg \
+            --name invitelink-aks \
             --overwrite-existing
 
-      # Create or update namespace
-      - name: Create namespace if it doesn't exist
-        if: needs.prepare.outputs.namespace_exists == 'false'
+      - name: Create namespace
         run: |
-          kubectl create namespace ${{ needs.prepare.outputs.namespace }}
-          kubectl label namespace ${{ needs.prepare.outputs.namespace }} \
-            environment=${{ needs.prepare.outputs.namespace }} \
-            created-at=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-            created-by=github-actions
+          kubectl create namespace ${{ needs.prepare.outputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
 
-      # Create/update image pull secret
-      - name: Create image pull secret
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+
+      - name: Deploy backend with Helm
         run: |
-          kubectl create secret docker-registry acr-secret \
-            --docker-server=${{ env.REGISTRY_LOGIN_SERVER }} \
-            --docker-username=${{ env.REGISTRY_USERNAME }} \
-            --docker-password='${{ env.REGISTRY_PASSWORD }}' \
-            --docker-email=ci@github.com \
-            -n ${{ needs.prepare.outputs.namespace }} \
-            --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install smartinvite-api ./k8s/charts/backend \
+            --namespace ${{ needs.prepare.outputs.namespace }} \
+            --set image.repository=$(echo ${{ needs.build-backend.outputs.image_uri }} | cut -d: -f1) \
+            --set image.tag=$(echo ${{ needs.build-backend.outputs.image_uri }} | cut -d: -f2) \
+            --wait --timeout 5m
 
-      # Deploy backend (update if namespace exists, create if doesn't)
-      - name: Deploy backend
-        if: needs.build-and-push.outputs.backend_built == 'true'
+      - name: Deploy frontend with Helm
         run: |
-          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
-          IMAGE_URI="${{ needs.build-and-push.outputs.backend_image }}"
-          
-          # Try to update existing deployment
-          kubectl set image deployment/smartinvite-api \
-            smartinvite-api="${IMAGE_URI}" \
-            -n "${NAMESPACE}" \
-            --record 2>/dev/null || \
-          
-          # If deployment doesn't exist, create it from manifest
-          kubectl apply -f k8s/backend-deployment.yml -n "${NAMESPACE}" && \
-          kubectl set image deployment/smartinvite-api \
-            smartinvite-api="${IMAGE_URI}" \
-            -n "${NAMESPACE}" \
-            --record
+          helm upgrade --install invitelink-frontend ./k8s/charts/frontend \
+            --namespace ${{ needs.prepare.outputs.namespace }} \
+            --set image.repository=$(echo ${{ needs.build-frontend.outputs.image_uri }} | cut -d: -f1) \
+            --set image.tag=$(echo ${{ needs.build-frontend.outputs.image_uri }} | cut -d: -f2) \
+            --wait --timeout 5m
 
-      # Deploy frontend (update if namespace exists, create if doesn't)
-      - name: Deploy frontend
-        if: needs.build-and-push.outputs.frontend_built == 'true'
-        run: |
-          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
-          IMAGE_URI="${{ needs.build-and-push.outputs.frontend_image }}"
-          
-          # Try to update existing deployment
-          kubectl set image deployment/invitelink-frontend \
-            invitelink-frontend="${IMAGE_URI}" \
-            -n "${NAMESPACE}" \
-            --record 2>/dev/null || \
-          
-          # If deployment doesn't exist, create it from manifest
-          kubectl apply -f k8s/frontend-deployment.yml -n "${NAMESPACE}" && \
-          kubectl set image deployment/invitelink-frontend \
-            invitelink-frontend="${IMAGE_URI}" \
-            -n "${NAMESPACE}" \
-            --record
-
-      # Wait for rollouts
-      - name: Wait for backend rollout
-        if: needs.build-and-push.outputs.backend_built == 'true'
-        run: |
-          kubectl rollout status deployment/smartinvite-api \
-            -n ${{ needs.prepare.outputs.namespace }} \
-            --timeout=5m
-
-      - name: Wait for frontend rollout
-        if: needs.build-and-push.outputs.frontend_built == 'true'
-        run: |
-          kubectl rollout status deployment/invitelink-frontend \
-            -n ${{ needs.prepare.outputs.namespace }} \
-            --timeout=5m
-
-      # Get deployment status
       - name: Get deployment status
         if: always()
         run: |
-          echo "=== Namespace: ${{ needs.prepare.outputs.namespace }} ==="
+          echo "=== Namespace: ${{ needs.prepare.outputs.namespace }} ===" 
           kubectl get deployments -n ${{ needs.prepare.outputs.namespace }} || true
           echo ""
-          echo "=== Services ==="
-          kubectl get services -n ${{ needs.prepare.outputs.namespace }} || true
-          echo ""
-          echo "=== Pods ==="
+          echo "=== Pods ===" 
           kubectl get pods -n ${{ needs.prepare.outputs.namespace }} || true
 
-      # Post deployment info
       - name: Post deployment summary
         if: always()
         run: |
-          echo "## ✅ Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Applications Deployed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Namespace**: \`${{ needs.prepare.outputs.namespace }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Backend Deployed**: ${{ needs.build-and-push.outputs.backend_built }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Frontend Deployed**: ${{ needs.build-and-push.outputs.frontend_built }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Namespace Existed**: ${{ needs.prepare.outputs.namespace_exists }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ needs.build-and-push.outputs.backend_built }}" == "true" ]]; then
-            echo "**Backend Image**: \`${{ needs.build-and-push.outputs.backend_image }}\`" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          if [[ "${{ needs.build-and-push.outputs.frontend_built }}" == "true" ]]; then
-            echo "**Frontend Image**: \`${{ needs.build-and-push.outputs.frontend_image }}\`" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "**Backend Image**: \`${{ needs.build-backend.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Frontend Image**: \`${{ needs.build-frontend.outputs.image_uri }}\`" >> $GITHUB_STEP_SUMMARY

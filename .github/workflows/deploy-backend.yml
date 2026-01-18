@@ -1,101 +1,56 @@
-name: Deploy Backend
-run-name: Deploy Backend - ${{ github.event.pull_request.title || github.ref_name }}
+name: Build & Push Backend
+run-name: Build & Push Backend - ${{ github.event.pull_request.title || github.ref_name }}
 
 on:
   push:
   pull_request:
   workflow_dispatch:
     inputs:
-      namespace:
-        description: 'Kubernetes namespace to deploy to'
-        required: true
-        type: string
-      environment:
-        description: 'Environment name (dev, staging, prod)'
-        required: false
-        type: string
-      deployment_reason:
-        description: 'Reason for manual deployment'
+      tag_suffix:
+        description: 'Image tag suffix (optional, defaults to branch/PR info)'
         required: false
         type: string
 
 concurrency:
-  group: deploy-backend
+  group: build-backend
   cancel-in-progress: true
 
-env:
-  REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
-  REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
-  REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
-  AKS_CLUSTER_NAME: invitelink-aks
-  AKS_RESOURCE_GROUP: invitelink-rg
-
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.image.outputs.uri }}
+      image_tag: ${{ steps.tag.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Determine namespace
-        id: namespace
+      - name: Determine image tag
+        id: tag
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.namespace }}" ]]; then
-            NAMESPACE="${{ inputs.namespace }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag_suffix }}" ]]; then
+            TAG_SUFFIX="${{ inputs.tag_suffix }}"
           elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            NAMESPACE="pr-${{ github.event.pull_request.number }}"
+            TAG_SUFFIX="pr-${{ github.event.pull_request.number }}"
           else
-            NAMESPACE="main"
+            TAG_SUFFIX="main"
           fi
-          IMAGE_TAG="${NAMESPACE}-${{ github.sha }}"
-          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
-          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          
-      - name: Check if backend changes
-        id: changes
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # On PR opened, always deploy. On updates, check for backend changes
-            if [[ "${{ github.event.action }}" == "opened" ]]; then
-              echo "should_deploy=true" >> $GITHUB_OUTPUT
-              echo "reason=pr_opened" >> $GITHUB_OUTPUT
-            else
-              # Check if backend files changed between PR base and head
-              BASE_SHA="${{ github.event.pull_request.base.sha }}"
-              HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-              if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/'; then
-                echo "should_deploy=true" >> $GITHUB_OUTPUT
-                echo "reason=backend_changes" >> $GITHUB_OUTPUT
-              else
-                echo "should_deploy=false" >> $GITHUB_OUTPUT
-                echo "reason=no_backend_changes" >> $GITHUB_OUTPUT
-              fi
-            fi
-          else
-            echo "should_deploy=true" >> $GITHUB_OUTPUT
-            echo "reason=main_branch" >> $GITHUB_OUTPUT
-          fi
+          IMAGE_TAG="${TAG_SUFFIX}-${{ github.sha }}"
+          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
-      # Build backend
       - name: Setup .NET
-        if: steps.changes.outputs.should_deploy == 'true'
         uses: actions/setup-dotnet@v3
         with:
           dotnet-version: '8.0.x'
 
       - name: Build and test backend
-        if: steps.changes.outputs.should_deploy == 'true'
         working-directory: ./backend/SmartInvite.Api/SmartInvite.Api
         run: |
           dotnet restore
           dotnet build --configuration Release --no-restore
           dotnet test ../../SmartInvite.Api.Tests --configuration Release --logger "trx"
 
-      # Push to ACR
       - name: Azure Login
-        if: steps.changes.outputs.should_deploy == 'true'
         uses: azure/login@v1
         with:
           creds: |
@@ -107,17 +62,14 @@ jobs:
             }
 
       - name: Fetch ACR credentials
-        if: steps.changes.outputs.should_deploy == 'true'
         id: acr
         run: |
-          # Determine ACR login server (prefer RG-scoped, fallback to subscription-wide)
-          ACR_LOGIN_SERVER=$(az acr list --resource-group ${{ env.AKS_RESOURCE_GROUP }} --query "[0].loginServer" -o tsv || true)
+          ACR_LOGIN_SERVER=$(az acr list --resource-group invitelink-rg --query "[0].loginServer" -o tsv || true)
           if [[ -z "$ACR_LOGIN_SERVER" ]]; then
             ACR_LOGIN_SERVER=$(az acr list --query "[0].loginServer" -o tsv)
           fi
           echo "login_server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
-
-          # Derive ACR name and fetch admin credentials
+          
           ACR_NAME=${ACR_LOGIN_SERVER%%.azurecr.io}
           CREDS_JSON=$(az acr credential show -n "$ACR_NAME")
           ACR_USERNAME=$(echo "$CREDS_JSON" | jq -r '.username')
@@ -126,70 +78,19 @@ jobs:
           echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
-        if: steps.changes.outputs.should_deploy == 'true'
+        id: image
         run: |
           docker login "${{ steps.acr.outputs.login_server }}" -u "${{ steps.acr.outputs.username }}" -p "${{ steps.acr.outputs.password }}"
           docker build -f ./backend/SmartInvite.Api/SmartInvite.Api/Dockerfile \
-            -t ${{ steps.acr.outputs.login_server }}/smartinvite-api:${{ steps.namespace.outputs.image_tag }} \
+            -t ${{ steps.acr.outputs.login_server }}/smartinvite-api:${{ steps.tag.outputs.tag }} \
             ./backend/SmartInvite.Api/SmartInvite.Api
-          docker push ${{ steps.acr.outputs.login_server }}/smartinvite-api:${{ steps.namespace.outputs.image_tag }}
-
-      - name: Setup Kubernetes credentials
-        if: steps.changes.outputs.should_deploy == 'true'
-        run: |
-          az aks get-credentials \
-            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
-            --name ${{ env.AKS_CLUSTER_NAME }} \
-            --overwrite-existing
-
-      - name: Setup Helm
-        if: steps.changes.outputs.should_deploy == 'true'
-        uses: azure/setup-helm@v3
-
-      - name: Deploy with Helm
-        if: steps.changes.outputs.should_deploy == 'true'
-        id: deploy
-        run: |
-          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
-          kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+          docker push ${{ steps.acr.outputs.login_server }}/smartinvite-api:${{ steps.tag.outputs.tag }}
           
-          helm upgrade --install smartinvite-api ./k8s/charts/backend \
-            --namespace ${NAMESPACE} \
-            --set image.repository=${{ steps.acr.outputs.login_server }}/smartinvite-api \
-            --set image.tag=${{ steps.namespace.outputs.image_tag }} \
-            --set namespace=${NAMESPACE} \
-            --wait --timeout 5m
-          
-          # Get backend URL
-          BACKEND_IP=$(kubectl get svc smartinvite-api -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "backend_url=http://${BACKEND_IP}" >> $GITHUB_OUTPUT
+          IMAGE_URI="${{ steps.acr.outputs.login_server }}/smartinvite-api:${{ steps.tag.outputs.tag }}"
+          echo "uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
-      - name: Comment on PR with deployment info
-        if: steps.changes.outputs.should_deploy == 'true' && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const namespace = '${{ steps.namespace.outputs.namespace }}';
-            const backendUrl = '${{ steps.deploy.outputs.backend_url }}';
-            const reason = '${{ steps.changes.outputs.reason }}';
-            
-            const comment = `## 🚀 Backend Deployed
-            
-            **Namespace:** \`${namespace}\`
-            **Backend URL:** ${backendUrl}
-            **Reason:** ${reason}
-            
-            _Deployment completed at ${new Date().toISOString()}_`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
-      
-      - name: Skip deployment message
-        if: steps.changes.outputs.should_deploy == 'false'
+      - name: Push summary
         run: |
-          echo "⏭️ Skipping backend deployment - no backend changes detected"
-          echo "Backend will continue using existing deployment in namespace: ${{ steps.namespace.outputs.namespace }}"
+          echo "## 🔨 Backend Build & Push Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ steps.image.outputs.uri }}\`" >> $GITHUB_STEP_SUMMARY
