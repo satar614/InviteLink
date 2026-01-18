@@ -136,6 +136,8 @@ jobs:
           echo "Step 3: Importing Kubernetes cluster..."
           AKS_ID=$(az aks show -n invitelink-aks -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
           if [[ ! -z "$AKS_ID" ]]; then
+            # Azure CLI returns resourcegroups in lowercase, but Terraform expects resourceGroups
+            AKS_ID=$(echo "$AKS_ID" | sed 's|/resourcegroups/|/resourceGroups/|i')
             terraform import $TF_VARS -input=false azurerm_kubernetes_cluster.aks "$AKS_ID" 2>&1 || {
               echo "AKS import result code: $?"
             }
@@ -214,6 +216,8 @@ jobs:
           echo "Attempting AKS import..."
           AKS_ID=$(az aks show -n invitelink-aks -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
           if [[ ! -z "$AKS_ID" ]]; then
+            # Azure CLI returns resourcegroups in lowercase, but Terraform expects resourceGroups
+            AKS_ID=$(echo "$AKS_ID" | sed 's|/resourcegroups/|/resourceGroups/|i')
             terraform import $TF_VARS -input=false azurerm_kubernetes_cluster.aks "$AKS_ID" >/dev/null 2>&1 && echo "✓ AKS imported" || echo "⚠ AKS import failed or already exists"
           fi
           

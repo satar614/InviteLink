@@ -17,7 +17,6 @@ provider "kubernetes" {
 provider "helm" {
   # Use placeholder values - will be configured properly once AKS is in state
   kubernetes {
-    skip_credentials_validation = true
     host                   = "https://kubernetes.default.svc"
     client_certificate     = ""
     client_key             = ""
