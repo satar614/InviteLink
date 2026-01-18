@@ -1,0 +1,339 @@
+name: Deploy Applications
+run-name: Deploy Applications - ${{ github.event.pull_request.title || github.ref_name }}
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: deploy-apps
+  cancel-in-progress: true
+
+jobs:
+  wait-for-builds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for backend and frontend builds to complete
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Checking for running backend/frontend builds..."
+          
+          # Wait for backend builds (deploy-backend.yml)
+          while true; do
+            BACKEND_RUNS=$(gh run list \
+              --repo ${{ github.repository }} \
+              --workflow deploy-backend.yml \
+              --json status \
+              --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
+            
+            if [[ "$BACKEND_RUNS" -eq 0 ]]; then
+              echo "No backend builds running"
+              break
+            fi
+            echo "Waiting for $BACKEND_RUNS backend build(s) to complete..."
+            sleep 10
+          done
+          
+          # Wait for frontend builds (deploy-frontend.yml)
+          while true; do
+            FRONTEND_RUNS=$(gh run list \
+              --repo ${{ github.repository }} \
+              --workflow deploy-frontend.yml \
+              --json status \
+              --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
+            
+            if [[ "$FRONTEND_RUNS" -eq 0 ]]; then
+              echo "No frontend builds running"
+              break
+            fi
+            echo "Waiting for $FRONTEND_RUNS frontend build(s) to complete..."
+            sleep 10
+          done
+          
+          echo "All builds complete, proceeding with deployment"
+
+  prepare:
+    needs: [wait-for-builds]
+    runs-on: ubuntu-latest
+    outputs:
+      namespace: ${{ steps.setup.outputs.namespace }}
+      tag_suffix: ${{ steps.setup.outputs.tag_suffix }}
+    steps:
+      - name: Determine namespace and tag
+        id: setup
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "PR number: ${{ github.event.pull_request.number }}"
+          
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            NAMESPACE="pr-${{ github.event.pull_request.number }}"
+            TAG_SUFFIX="pr-${{ github.event.pull_request.number }}"
+          else
+            NAMESPACE="main"
+            TAG_SUFFIX="main"
+          fi
+          
+          echo "Determined namespace: $NAMESPACE"
+          echo "Determined tag_suffix: $TAG_SUFFIX"
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "tag_suffix=${TAG_SUFFIX}" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "aa7c9b06-76d3-4dde-976a-48b8166bddb8",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
+              "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
+            }
+
+      - name: Fetch latest backend image from ACR
+        id: backend_image
+        run: |
+          ACR_NAME="invitelinkacre9c72f7a"
+          REPO="smartinvite-api"
+          TAG_PREFIX="${{ needs.prepare.outputs.tag_suffix }}"
+          
+          echo "Looking for latest backend image with tag prefix: $TAG_PREFIX"
+          
+          # Try to find the tag - look for tags starting with the prefix, get the most recent
+          MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+            --orderby time_desc --query "[?starts_with(@, '$TAG_PREFIX')] | [0]" -o tsv 2>/dev/null || echo "")
+          
+          # Fallback to main if no PR tag found
+          if [[ -z "$MATCHING_TAG" && "$TAG_PREFIX" != "main" ]]; then
+            echo "No PR tag found, falling back to main image"
+            MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+              --orderby time_desc --query "[?starts_with(@, 'main')] | [0]" -o tsv 2>/dev/null || echo "")
+          fi
+          
+          if [[ -z "$MATCHING_TAG" ]]; then
+            echo "ERROR: No image tag found for $REPO"
+            exit 1
+          fi
+          
+          IMAGE="${ACR_NAME}.azurecr.io/${REPO}:${MATCHING_TAG}"
+          echo "Backend image: $IMAGE"
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+
+      - name: Fetch latest frontend image from ACR
+        id: frontend_image
+        run: |
+          ACR_NAME="invitelinkacre9c72f7a"
+          REPO="invitelink-frontend"
+          TAG_PREFIX="${{ needs.prepare.outputs.tag_suffix }}"
+          
+          echo "Looking for latest frontend image with tag prefix: $TAG_PREFIX"
+          
+          # Try to find the tag - look for tags starting with the prefix, get the most recent
+          MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+            --orderby time_desc --query "[?starts_with(@, '$TAG_PREFIX')] | [0]" -o tsv 2>/dev/null || echo "")
+          
+          # Fallback to main if no PR tag found
+          if [[ -z "$MATCHING_TAG" && "$TAG_PREFIX" != "main" ]]; then
+            echo "No PR tag found, falling back to main image"
+            MATCHING_TAG=$(az acr repository show-tags -n "$ACR_NAME" --repository "$REPO" \
+              --orderby time_desc --query "[?starts_with(@, 'main')] | [0]" -o tsv 2>/dev/null || echo "")
+          fi
+          
+          if [[ -z "$MATCHING_TAG" ]]; then
+            echo "ERROR: No image tag found for $REPO"
+            exit 1
+          fi
+          
+          IMAGE="${ACR_NAME}.azurecr.io/${REPO}:${MATCHING_TAG}"
+          echo "Frontend image: $IMAGE"
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group invitelink-rg \
+            --name invitelink-aks \
+            --overwrite-existing
+
+      - name: Create namespace
+        run: |
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+            echo "Namespace $NAMESPACE already exists"
+          else
+            echo "Creating namespace $NAMESPACE"
+            kubectl create namespace "$NAMESPACE"
+          fi
+
+      - name: Create ACR pull secret
+        run: |
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          ACR_NAME="invitelinkacre9c72f7a"
+          ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+          
+          # Get ACR credentials
+          ACR_USERNAME=$(az acr credential show -n "$ACR_NAME" --query username -o tsv)
+          ACR_PASSWORD=$(az acr credential show -n "$ACR_NAME" --query passwords[0].value -o tsv)
+          
+          # Check if secret already exists
+          if kubectl get secret acr-secret -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "ACR secret already exists in $NAMESPACE, deleting and recreating..."
+            kubectl delete secret acr-secret -n "$NAMESPACE"
+          fi
+          
+          # Create docker-registry secret
+          kubectl create secret docker-registry acr-secret \
+            --namespace "$NAMESPACE" \
+            --docker-server="$ACR_LOGIN_SERVER" \
+            --docker-username="$ACR_USERNAME" \
+            --docker-password="$ACR_PASSWORD"
+          
+          echo "ACR pull secret created in $NAMESPACE"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          token: ${{ github.token }}
+
+      - name: Clean up stuck Helm releases
+        run: |
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          
+          # Check for pending-install or pending-upgrade releases
+          echo "Checking for stuck Helm releases in $NAMESPACE..."
+          
+          if helm list -n "$NAMESPACE" --pending 2>/dev/null | grep -q .; then
+            echo "Found pending Helm releases, rolling back..."
+            helm list -n "$NAMESPACE" --pending -o json | jq -r '.[].name' | while read release; do
+              echo "Rolling back $release..."
+              helm rollback "$release" -n "$NAMESPACE" || helm uninstall "$release" -n "$NAMESPACE" || true
+            done
+          else
+            echo "No stuck releases found"
+          fi
+
+      - name: Deploy backend with Helm
+        run: |
+          IMAGE="${{ steps.backend_image.outputs.image }}"
+          IMAGE_REPO="${IMAGE%:*}"
+          IMAGE_TAG="${IMAGE##*:}"
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          
+          echo "Deploying backend: $IMAGE_REPO:$IMAGE_TAG to namespace: $NAMESPACE"
+          helm upgrade --install smartinvite-api ./k8s/charts/backend \
+            --namespace "$NAMESPACE" \
+            --set image.repository="$IMAGE_REPO" \
+            --set image.tag="$IMAGE_TAG" \
+            --set namespace="$NAMESPACE" \
+            --wait --timeout 10m
+
+      - name: Wait for backend load balancer IP
+        id: backend_lb
+        run: |
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          echo "Waiting for backend service external IP..."
+          for i in {1..30}; do
+            IP=$(kubectl get svc smartinvite-api -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [[ -n "$IP" ]]; then
+              echo "Backend service IP: $IP"
+              echo "ip=$IP" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "Still pending... ($i/30)"
+            sleep 10
+          done
+          echo "Backend service IP not assigned yet"
+
+      - name: Deploy frontend with Helm
+        run: |
+          IMAGE="${{ steps.frontend_image.outputs.image }}"
+          IMAGE_REPO="${IMAGE%:*}"
+          IMAGE_TAG="${IMAGE##*:}"
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          BACKEND_IP="${{ steps.backend_lb.outputs.ip }}"
+          BACKEND_URL=""
+
+          if [[ -n "$BACKEND_IP" ]]; then
+            BACKEND_URL="http://$BACKEND_IP"
+            echo "Using backend URL for frontend landing page: $BACKEND_URL"
+          fi
+          
+          echo "Deploying frontend: $IMAGE_REPO:$IMAGE_TAG to namespace: $NAMESPACE"
+          helm upgrade --install invitelink-frontend ./k8s/charts/frontend \
+            --namespace "$NAMESPACE" \
+            --set image.repository="$IMAGE_REPO" \
+            --set image.tag="$IMAGE_TAG" \
+            --set namespace="$NAMESPACE" \
+            ${BACKEND_URL:+--set app.backendUrl="$BACKEND_URL"} \
+            --wait --timeout 10m
+
+      - name: Get deployment status
+        if: always()
+        run: |
+          echo "=== Namespace: ${{ needs.prepare.outputs.namespace }} ===" 
+          kubectl get deployments -n ${{ needs.prepare.outputs.namespace }} || true
+          echo ""
+          echo "=== Pods ===" 
+          kubectl get pods -n ${{ needs.prepare.outputs.namespace }} || true
+
+      - name: Describe pods on failure
+        if: failure()
+        run: |
+          echo "=== Describe deployments ==="
+          kubectl describe deployment smartinvite-api -n ${{ needs.prepare.outputs.namespace }} || true
+          kubectl describe deployment invitelink-frontend -n ${{ needs.prepare.outputs.namespace }} || true
+          echo "=== Describe pods ==="
+          kubectl describe pods -n ${{ needs.prepare.outputs.namespace }} || true
+
+      - name: Comment PR with service URLs
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          BACKEND_IP=$(kubectl get svc smartinvite-api -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          FRONTEND_IP=$(kubectl get svc invitelink-frontend -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+
+          if [[ -n "$BACKEND_IP" ]]; then
+            BACKEND_URL="http://$BACKEND_IP"
+          else
+            BACKEND_URL="pending"
+          fi
+
+          if [[ -n "$FRONTEND_IP" ]]; then
+            FRONTEND_URL="http://$FRONTEND_IP"
+          else
+            FRONTEND_URL="pending"
+          fi
+
+          BODY="### Preview environment (namespace $NAMESPACE)\n- Backend Swagger: $BACKEND_URL/ Frontend Home: $FRONTEND_URL/"
+
+          echo "Posting comment to PR #$PR_NUMBER"
+          gh api repos/${{ github.repository }}/issues/$PR_NUMBER/comments -f body="$BODY"
+
+      - name: Post deployment summary
+        if: always()
+        run: |
+          echo "## ✅ Applications Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace**: \`${{ needs.prepare.outputs.namespace }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Backend Image**: \`${{ steps.backend_image.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Frontend Image**: \`${{ steps.frontend_image.outputs.image }}\`" >> $GITHUB_STEP_SUMMARY

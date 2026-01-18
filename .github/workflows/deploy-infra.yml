@@ -1,0 +1,136 @@
+name: Deploy Infrastructure
+run-name: Deploy Infrastructure - ${{ github.event.pull_request.title || github.ref_name }}
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment name (dev, staging, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      action:
+        description: 'Terraform action (plan, apply, destroy)'
+        required: false
+        default: 'apply'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      resource_group:
+        description: 'Azure Resource Group name'
+        required: false
+        default: 'invitelink-rg'
+        type: string
+      location:
+        description: 'Azure Region'
+        required: false
+        default: 'uksouth'
+        type: choice
+        options:
+          - eastus
+          - westus
+          - centralus
+          - westeurope
+          - northeurope
+          - uksouth
+      deployment_reason:
+        description: 'Reason for manual deployment'
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-infrastructure
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.5.0
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ARM_CLIENT_ID: "aa7c9b06-76d3-4dde-976a-48b8166bddb8"
+      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: "26105aab-ded4-4e66-a408-309b2e23092c"
+      ARM_TENANT_ID: "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
+      TF_INPUT: "false"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "aa7c9b06-76d3-4dde-976a-48b8166bddb8",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
+              "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
+            }
+
+      - name: Terraform Init
+        working-directory: ./infra
+        run: terraform init
+
+      - name: Terraform Format Check
+        working-directory: ./infra
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Terraform Plan
+        working-directory: ./infra
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual deployment triggered"
+            echo "Environment: ${{ inputs.environment }}"
+            echo "Action: ${{ inputs.action }}"
+            echo "Resource Group: ${{ inputs.resource_group }}"
+            echo "Location: ${{ inputs.location }}"
+            echo "Reason: ${{ inputs.deployment_reason }}"
+          fi
+          
+          echo "Starting Terraform plan..."
+          terraform plan \
+            -input=false \
+            -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
+            -var="acr_name=invitelinkacre9c72f7a" \
+            -var="resource_group_name=invitelink-rg" \
+            -var="location=uksouth" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        if: |
+          (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+        working-directory: ./infra
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Terraform Destroy
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+        working-directory: ./infra
+        run: terraform destroy -input=false -auto-approve
+
+      - name: Get Outputs
+        if: |
+          (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+        working-directory: ./infra
+        run: |
+          terraform output -json > /tmp/tf-outputs.json
+          cat /tmp/tf-outputs.json

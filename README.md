@@ -34,7 +34,7 @@ At the event:
 ### 2. RSVP System
 - Scan → RSVP page → submit.
 - Collects guest name, phone, plus-ones, parking preference.
-- Saves to Firestore or Supabase.
+- Saves to Azure Database.
 
 ### 3. Event Dashboard
 - Real-time overview:
@@ -102,15 +102,25 @@ At the event:
 ---
 
 ## 🧠 For Developers
-InviteLink is built with scalability in mind — adaptable for weddings, conferences, and any event needing structured access control.  
-Start by running:
 
+### Frontend Setup (React Native)
 ```bash
-npx create-next-app invitellink
-cd invitellink
-npm install firebase qrcode twilio
-npm run dev
+cd frontend
+npm install
+npm run android  # For Android emulator
+npm run ios      # For iOS simulator
 ```
+
+### Backend Setup (C# .NET)
+```bash
+cd backend/SmartInvite.Api
+dotnet restore
+dotnet build
+dotnet run
+```
+
+### Deployment
+The application is deployed to Azure using Terraform and GitHub Actions. See the infrastructure section below for deployment instructions.
 
 ---
 
@@ -169,4 +179,3 @@ The GitHub Actions pipeline performs the following steps:
 ---
 
 For detailed documentation, refer to the `docs/` folder.
-# InviteLink

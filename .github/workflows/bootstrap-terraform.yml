@@ -1,0 +1,181 @@
+name: Bootstrap Terraform Backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: 'Resource group name for Terraform state'
+        required: false
+        default: 'terraform-state-rg'
+        type: string
+      storage_account:
+        description: 'Storage account name for Terraform state'
+        required: false
+        default: 'tfstate'
+        type: string
+      location:
+        description: 'Azure Region'
+        required: false
+        default: 'uksouth'
+        type: choice
+        options:
+          - eastus
+          - westus
+          - centralus
+          - westeurope
+          - northeurope
+          - uksouth
+      container_name:
+        description: 'Blob container name'
+        required: false
+        default: 'tfstate'
+        type: string
+
+env:
+  TERRAFORM_VERSION: 1.5.0
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "aa7c9b06-76d3-4dde-976a-48b8166bddb8",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
+              "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
+            }
+
+      - name: Set variables
+        id: vars
+        run: |
+          RG="${{ inputs.resource_group }}"
+          SA="${{ inputs.storage_account }}"
+          LOCATION="${{ inputs.location }}"
+          CONTAINER="${{ inputs.container_name }}"
+          
+          # Generate unique storage account name if needed (must be 3-24 chars, lowercase alphanumeric)
+          TIMESTAMP=$(date +%s | tail -c 6)
+          SA_UNIQUE="${SA}${TIMESTAMP}"
+          
+          echo "resource_group=$RG" >> $GITHUB_OUTPUT
+          echo "storage_account=$SA_UNIQUE" >> $GITHUB_OUTPUT
+          echo "location=$LOCATION" >> $GITHUB_OUTPUT
+          echo "container=$CONTAINER" >> $GITHUB_OUTPUT
+
+      - name: Create Resource Group for Terraform State
+        run: |
+          echo "Creating resource group: ${{ steps.vars.outputs.resource_group }}"
+          az group create \
+            --name "${{ steps.vars.outputs.resource_group }}" \
+            --location "${{ steps.vars.outputs.location }}" \
+            --tags purpose=terraform-state environment=shared
+          
+          echo "✅ Resource group created successfully"
+
+      - name: Create Storage Account for Terraform State
+        run: |
+          echo "Creating storage account: ${{ steps.vars.outputs.storage_account }}"
+          az storage account create \
+            --name "${{ steps.vars.outputs.storage_account }}" \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --location "${{ steps.vars.outputs.location }}" \
+            --sku Standard_LRS \
+            --kind StorageV2 \
+            --allow-blob-public-access false \
+            --min-tls-version TLS1_2 \
+            --tags purpose=terraform-state
+          
+          echo "✅ Storage account created successfully"
+
+      - name: Create Blob Container for Terraform State
+        run: |
+          echo "Creating blob container: ${{ steps.vars.outputs.container }}"
+          az storage container create \
+            --name "${{ steps.vars.outputs.container }}" \
+            --account-name "${{ steps.vars.outputs.storage_account }}" \
+            --auth-mode login
+          
+          echo "✅ Blob container created successfully"
+
+      - name: Get Storage Account Key
+        id: storage_key
+        run: |
+          KEY=$(az storage account keys list \
+            --resource-group "${{ steps.vars.outputs.resource_group }}" \
+            --account-name "${{ steps.vars.outputs.storage_account }}" \
+            --query '[0].value' -o tsv)
+          
+          echo "::add-mask::$KEY"
+          echo "storage_key=$KEY" >> $GITHUB_OUTPUT
+
+      - name: Display Bootstrap Summary
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🎉 Terraform Backend Bootstrap Complete!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "Resource Group: ${{ steps.vars.outputs.resource_group }}"
+          echo "Storage Account: ${{ steps.vars.outputs.storage_account }}"
+          echo "Container: ${{ steps.vars.outputs.container }}"
+          echo "Location: ${{ steps.vars.outputs.location }}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📝 Update your Terraform backend configuration:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "terraform {"
+          echo "  backend \"azurerm\" {"
+          echo "    resource_group_name  = \"${{ steps.vars.outputs.resource_group }}\""
+          echo "    storage_account_name = \"${{ steps.vars.outputs.storage_account }}\""
+          echo "    container_name       = \"${{ steps.vars.outputs.container }}\""
+          echo "    key                  = \"terraform.tfstate\""
+          echo "  }"
+          echo "}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🔐 Add these GitHub Secrets (if using):"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "TERRAFORM_BACKEND_RESOURCE_GROUP: ${{ steps.vars.outputs.resource_group }}"
+          echo "TERRAFORM_BACKEND_STORAGE_ACCOUNT: ${{ steps.vars.outputs.storage_account }}"
+          echo "TERRAFORM_BACKEND_CONTAINER: ${{ steps.vars.outputs.container }}"
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Save Configuration
+        run: |
+          cat > terraform-backend-config.txt << EOF
+          # Terraform Backend Configuration
+          # Generated: $(date)
+          
+          Resource Group: ${{ steps.vars.outputs.resource_group }}
+          Storage Account: ${{ steps.vars.outputs.storage_account }}
+          Container: ${{ steps.vars.outputs.container }}
+          Location: ${{ steps.vars.outputs.location }}
+          
+          # Terraform Backend Block (add to your main.tf or backend.tf):
+          terraform {
+            backend "azurerm" {
+              resource_group_name  = "${{ steps.vars.outputs.resource_group }}"
+              storage_account_name = "${{ steps.vars.outputs.storage_account }}"
+              container_name       = "${{ steps.vars.outputs.container }}"
+              key                  = "terraform.tfstate"
+            }
+          }
+          EOF
+          
+          cat terraform-backend-config.txt
+
+      - name: Upload Configuration
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-backend-config
+          path: terraform-backend-config.txt
+          retention-days: 90

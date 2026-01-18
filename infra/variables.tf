@@ -6,7 +6,7 @@ variable "subscription_id" {
 variable "location" {
   description = "Azure region for resources"
   type        = string
-  default     = "UK South"
+  default     = "uksouth"
 }
 
 variable "acr_name" {
@@ -17,5 +17,5 @@ variable "acr_name" {
 variable "resource_group_name" {
   description = "Resource group name for hub resources"
   type        = string
-  default     = "smart-invite-hub-rg"
+  default     = "invitelink-rg"
 }

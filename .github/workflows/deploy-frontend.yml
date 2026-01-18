@@ -1,0 +1,114 @@
+name: "Frontend: Build & Push"
+run-name: "Frontend: Build & Push - ${{ github.event.pull_request.title || github.ref_name }}"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: 'Image tag suffix (optional, defaults to branch/PR info)'
+        required: false
+        type: string
+
+concurrency:
+  group: build-frontend
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.image.outputs.uri }}
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine image tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag_suffix }}" ]]; then
+            TAG_SUFFIX="${{ inputs.tag_suffix }}"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            TAG_SUFFIX="pr-${{ github.event.pull_request.number }}"
+          else
+            TAG_SUFFIX="main"
+          fi
+          IMAGE_TAG="${TAG_SUFFIX}-${{ github.sha }}"
+          echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build and test frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run test -- --coverage --watchAll=false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "aa7c9b06-76d3-4dde-976a-48b8166bddb8",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
+              "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
+            }
+
+      - name: Fetch ACR credentials
+        id: acr
+        run: |
+          ACR_LOGIN_SERVER="invitelinkacre9c72f7a.azurecr.io"
+          ACR_NAME="invitelinkacre9c72f7a"
+          
+          echo "login_server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+          
+          # Fetch credentials for the ACR
+          CREDS_JSON=$(az acr credential show -n "$ACR_NAME")
+          ACR_USERNAME=$(echo "$CREDS_JSON" | jq -r '.username')
+          ACR_PASSWORD=$(echo "$CREDS_JSON" | jq -r '.passwords[0].value')
+          
+          echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+          echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        id: image
+        run: |
+          LOGIN_SERVER="${{ steps.acr.outputs.login_server }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          
+          echo "Login Server: $LOGIN_SERVER"
+          echo "Tag: $TAG"
+          
+          docker login "$LOGIN_SERVER" -u "${{ steps.acr.outputs.username }}" -p "${{ steps.acr.outputs.password }}"
+          
+          IMAGE_TAG="${LOGIN_SERVER}/invitelink-frontend:${TAG}"
+          echo "Building image: $IMAGE_TAG"
+          
+          # Build from repo root with Dockerfile path
+          docker build -f frontend/Dockerfile \
+            -t "${IMAGE_TAG}" \
+            .
+          docker push "${IMAGE_TAG}"
+          
+          echo "uri=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Push summary
+        run: |
+          echo "## 🔨 Frontend Build & Push Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ steps.image.outputs.uri }}\`" >> $GITHUB_STEP_SUMMARY

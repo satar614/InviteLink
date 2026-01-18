@@ -1,0 +1,351 @@
+name: Manual Deploy & Test Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: 'Kubernetes namespace (will be created if it does not exist)'
+        required: true
+        type: string
+      environment:
+        description: 'Environment name (dev, staging, prod, etc.)'
+        required: true
+        type: string
+      backend_image:
+        description: 'Backend image tag (default: latest from main)'
+        required: false
+        type: string
+      frontend_image:
+        description: 'Frontend image tag (default: latest from main)'
+        required: false
+        type: string
+      run_tests:
+        description: 'Run E2E tests after deployment'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
+  REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+  AKS_CLUSTER_NAME: invitelink-aks
+  AKS_RESOURCE_GROUP: invitelink-rg
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      namespace: ${{ steps.urls.outputs.namespace }}
+      backend_url: ${{ steps.urls.outputs.backend_url }}
+      frontend_url: ${{ steps.urls.outputs.frontend_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "aa7c9b06-76d3-4dde-976a-48b8166bddb8",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
+              "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
+            }
+
+      - name: Get ACR Credentials
+        id: acr
+        run: |
+          ACR_NAME=$(az acr list --resource-group ${{ env.AKS_RESOURCE_GROUP }} --query '[0].name' -o tsv)
+          ACR_LOGIN_SERVER=$(az acr list --resource-group ${{ env.AKS_RESOURCE_GROUP }} --query '[0].loginServer' -o tsv)
+          ACR_USERNAME=$(az acr credential show --name "$ACR_NAME" --query 'username' -o tsv)
+          ACR_PASSWORD=$(az acr credential show --name "$ACR_NAME" --query 'passwords[0].value' -o tsv)
+          echo "::add-mask::$ACR_PASSWORD"
+          echo "login_server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
+          echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+          echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+
+      - name: Check if namespace exists
+        id: namespace
+        run: |
+          NAMESPACE="${{ inputs.namespace }}"
+          
+          if kubectl get namespace "$NAMESPACE" &>/dev/null; then
+            echo "namespace_exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Namespace '$NAMESPACE' already exists - will update"
+          else
+            echo "namespace_exists=false" >> $GITHUB_OUTPUT
+            echo "📦 Namespace '$NAMESPACE' does not exist - will create new"
+          fi
+          
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          IMAGE_TAG="${{ inputs.backend_image || format('{0}-{1}', github.ref_name, github.sha) }}"
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Create namespace if needed
+        if: steps.namespace.outputs.namespace_exists == 'false'
+        run: |
+          kubectl create namespace "${{ steps.namespace.outputs.namespace }}"
+          echo "✅ Created namespace: ${{ steps.namespace.outputs.namespace }}"
+
+      - name: Build backend Docker image
+        run: |
+          docker build \
+            --tag ${{ env.REGISTRY_LOGIN_SERVER }}/smartinvite-api:${{ steps.namespace.outputs.image_tag }} \
+            --file backend/SmartInvite.Api/SmartInvite.Api/Dockerfile \
+            backend/SmartInvite.Api/SmartInvite.Api/
+
+      - name: Push backend image to ACR
+        run: |
+          echo "${{ steps.acr.outputs.password }}" | docker login -u "${{ steps.acr.outputs.username }}" --password-stdin ${{ steps.acr.outputs.login_server }}
+          docker push ${{ steps.acr.outputs.login_server }}/smartinvite-api:${{ steps.namespace.outputs.image_tag }}
+          echo "✅ Pushed backend image: smartinvite-api:${{ steps.namespace.outputs.image_tag }}"
+
+      - name: Build frontend Docker image
+        run: |
+          docker build \
+            --tag ${{ steps.acr.outputs.login_server }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }} \
+            --file frontend/Dockerfile \
+            frontend/
+
+      - name: Push frontend image to ACR
+        run: |
+          docker push ${{ steps.acr.outputs.login_server }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }}
+          echo "✅ Pushed frontend image: invitelink-frontend:${{ steps.namespace.outputs.image_tag }}"
+
+      - name: Deploy/Update backend with Helm
+        run: |
+          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+          IMAGE_TAG="${{ steps.namespace.outputs.image_tag }}"
+          REGISTRY_URL="${{ env.REGISTRY_LOGIN_SERVER }}"
+          # Override with fetched login server to avoid missing secrets
+          if [[ -n "${{ steps.acr.outputs.login_server }}" ]]; then
+            REGISTRY_URL="${{ steps.acr.outputs.login_server }}"
+          fi
+          
+          if [[ "${{ steps.namespace.outputs.namespace_exists }}" == "true" ]]; then
+            echo "Updating existing backend deployment..."
+            helm upgrade smartinvite-api k8s/charts/backend \
+              --namespace "$NAMESPACE" \
+              --values k8s/charts/backend/values.yaml \
+              --set image.repository="$REGISTRY_URL/smartinvite-api" \
+              --set image.tag="$IMAGE_TAG" \
+              --wait \
+              --timeout 5m
+          else
+            echo "Installing backend to new namespace..."
+            helm install smartinvite-api k8s/charts/backend \
+              --namespace "$NAMESPACE" \
+              --create-namespace \
+              --values k8s/charts/backend/values.yaml \
+              --set image.repository="$REGISTRY_URL/smartinvite-api" \
+              --set image.tag="$IMAGE_TAG" \
+              --wait \
+              --timeout 5m
+          fi
+          
+          echo "✅ Backend deployed to namespace: $NAMESPACE"
+
+      - name: Deploy/Update frontend with Helm
+        run: |
+          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+          IMAGE_TAG="${{ steps.namespace.outputs.image_tag }}"
+          REGISTRY_URL="${{ env.REGISTRY_LOGIN_SERVER }}"
+          
+          if [[ "${{ steps.namespace.outputs.namespace_exists }}" == "true" ]]; then
+            echo "Updating existing frontend deployment..."
+            helm upgrade invitelink-frontend k8s/charts/frontend \
+              --namespace "$NAMESPACE" \
+              --values k8s/charts/frontend/values.yaml \
+              --set image.repository="$REGISTRY_URL/invitelink-frontend" \
+              --set image.tag="$IMAGE_TAG" \
+              --wait \
+              --timeout 5m
+          else
+            echo "Installing frontend to new namespace..."
+            helm install invitelink-frontend k8s/charts/frontend \
+              --namespace "$NAMESPACE" \
+              --create-namespace \
+              --values k8s/charts/frontend/values.yaml \
+              --set image.repository="$REGISTRY_URL/invitelink-frontend" \
+              --set image.tag="$IMAGE_TAG" \
+              --wait \
+              --timeout 5m
+          fi
+          
+          echo "✅ Frontend deployed to namespace: $NAMESPACE"
+
+      - name: Wait for services to be ready
+        run: |
+          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+          echo "Waiting for deployments to be ready in namespace: $NAMESPACE"
+          
+          kubectl wait --for=condition=available deployment/smartinvite-api -n "$NAMESPACE" --timeout=300s || true
+          kubectl wait --for=condition=available deployment/invitelink-frontend -n "$NAMESPACE" --timeout=300s || true
+          
+          echo "✅ Deployments are available"
+
+      - name: Get service URLs
+        id: urls
+        run: |
+          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+          
+          # Wait for LoadBalancer IPs to be assigned
+          echo "Waiting for LoadBalancer IPs..."
+          for i in {1..30}; do
+            BACKEND_IP=$(kubectl get svc smartinvite-api -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            FRONTEND_IP=$(kubectl get svc invitelink-frontend -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            
+            if [ -n "$BACKEND_IP" ] && [ -n "$FRONTEND_IP" ]; then
+              break
+            fi
+            echo "Attempt $i/30: Waiting for IPs..."
+            sleep 10
+          done
+          
+          BACKEND_URL="http://${BACKEND_IP}"
+          FRONTEND_URL="http://${FRONTEND_IP}"
+          
+          echo "Backend URL: $BACKEND_URL"
+          echo "Frontend URL: $FRONTEND_URL"
+          
+          echo "backend_url=${BACKEND_URL}" >> $GITHUB_OUTPUT
+          echo "frontend_url=${FRONTEND_URL}" >> $GITHUB_OUTPUT
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+
+      - name: Wait for services to be healthy
+        run: |
+          BACKEND_URL="${{ steps.urls.outputs.backend_url }}"
+          FRONTEND_URL="${{ steps.urls.outputs.frontend_url }}"
+          
+          echo "Checking backend health at $BACKEND_URL..."
+          for i in {1..30}; do
+            if curl -f -s "${BACKEND_URL}/health" > /dev/null 2>&1; then
+              echo "✅ Backend is healthy"
+              break
+            fi
+            echo "Attempt $i/30: Backend not ready yet..."
+            sleep 10
+          done
+          
+          echo "Checking frontend health at $FRONTEND_URL..."
+          for i in {1..30}; do
+            if curl -f -s "${FRONTEND_URL}/health" > /dev/null 2>&1; then
+              echo "✅ Frontend is healthy"
+              break
+            fi
+            echo "Attempt $i/30: Frontend not ready yet..."
+            sleep 10
+          done
+
+      - name: Generate deployment summary
+        id: summary
+        run: |
+          NAMESPACE="${{ steps.urls.outputs.namespace }}"
+          BACKEND_URL="${{ steps.urls.outputs.backend_url }}"
+          FRONTEND_URL="${{ steps.urls.outputs.frontend_url }}"
+          ACTION="${{ steps.namespace.outputs.namespace_exists == 'true' && 'Updated' || 'Created' }}"
+          
+          cat > deployment-summary.md << EOF
+          ## 🚀 Manual Deployment Complete
+          
+          **Action:** $ACTION
+          **Namespace:** \`$NAMESPACE\`
+          **Environment:** ${{ inputs.environment }}
+          **Timestamp:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          ### Service URLs
+          - **Backend API:** [$BACKEND_URL]($BACKEND_URL)
+          - **Frontend:** [$FRONTEND_URL]($FRONTEND_URL)
+          - **Health Check:** [$BACKEND_URL/health]($BACKEND_URL/health)
+          
+          ### Next Steps
+          - Access the frontend at: $FRONTEND_URL
+          - API documentation: $BACKEND_URL/swagger
+          - Test with E2E suite (see workflow run for details)
+          
+          **Deployment ID:** ${{ github.run_id }}
+          **Triggered by:** ${{ github.actor }}
+          EOF
+          
+          cat deployment-summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload deployment summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-summary-${{ steps.urls.outputs.namespace }}
+          path: deployment-summary.md
+          retention-days: 30
+
+  test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: inputs.run_tests == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore E2E test dependencies
+        working-directory: ./tests/InviteLink.E2ETests
+        run: dotnet restore
+
+      - name: Build E2E tests
+        working-directory: ./tests/InviteLink.E2ETests
+        run: dotnet build --no-restore
+
+      - name: Run E2E tests
+        id: e2e
+        working-directory: ./tests/InviteLink.E2ETests
+        env:
+          BACKEND_URL: ${{ needs.deploy.outputs.backend_url }}
+          FRONTEND_URL: ${{ needs.deploy.outputs.frontend_url }}
+        run: |
+          dotnet test --no-build --logger "trx;LogFileName=test-results.trx" --logger "console;verbosity=detailed" || EXIT_CODE=$?
+          
+          echo ""
+          echo "========================================="
+          echo "E2E Test Results"
+          echo "========================================="
+          echo "Namespace: ${{ needs.deploy.outputs.namespace }}"
+          echo "Backend: ${{ needs.deploy.outputs.backend_url }}"
+          echo "Frontend: ${{ needs.deploy.outputs.frontend_url }}"
+          echo ""
+          
+          exit ${EXIT_CODE:-0}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results-${{ needs.deploy.outputs.namespace }}
+          path: |
+            tests/InviteLink.E2ETests/TestResults/**/*.trx
+            tests/InviteLink.E2ETests/TestResults/**/*.xml
+          retention-days: 30
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "## 🧪 E2E Tests Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** \`${{ needs.deploy.outputs.namespace }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Run:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[View detailed test results in artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,9 @@
+image:
+  repository: myacr.azurecr.io/invitelink-frontend
+  tag: latest
+
+replicas: 1
+namespace: main
+
+app:
+  backendUrl: ""

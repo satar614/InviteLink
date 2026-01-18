@@ -1,0 +1,261 @@
+name: E2E Tests
+
+on:
+  workflow_run:
+    workflows: ["Deploy Applications"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: 'Kubernetes namespace to test'
+        required: true
+        type: string
+      environment:
+        description: 'Environment name (dev, staging, prod)'
+        required: false
+        type: string
+
+env:
+  AKS_CLUSTER_NAME: invitelink-aks
+  AKS_RESOURCE_GROUP: invitelink-rg
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine namespace and PR number
+        id: namespace
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            NAMESPACE="${{ inputs.namespace }}"
+            # Extract PR number from namespace if it's a PR namespace
+            if [[ $NAMESPACE =~ ^pr-([0-9]+)$ ]]; then
+              PR_NUMBER="${BASH_REMATCH[1]}"
+              echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+            fi
+          elif [[ "${{ github.event.workflow_run.event }}" == "pull_request" ]]; then
+            # Get PR number from the workflow run
+            PR_NUMBER=$(gh api /repos/${{ github.repository }}/pulls \
+              --jq ".[] | select(.head.sha == \"${{ github.event.workflow_run.head_sha }}\") | .number" \
+              | head -1)
+            NAMESPACE="pr-${PR_NUMBER}"
+            echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          else
+            NAMESPACE="main"
+          fi
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "aa7c9b06-76d3-4dde-976a-48b8166bddb8",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
+              "tenantId": "511f39a2-16cf-4f1a-ac2a-0a45c4b61d37"
+            }
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+
+      - name: Get service URLs
+        id: urls
+        run: |
+          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+          
+          echo "Waiting for services to be ready in namespace ${NAMESPACE}..."
+          
+          # Wait for backend deployment to be ready
+          echo "Checking backend deployment..."
+          if kubectl get deployment smartinvite-api -n ${NAMESPACE} &> /dev/null; then
+            kubectl wait --for=condition=available deployment/smartinvite-api -n ${NAMESPACE} --timeout=300s || true
+            kubectl wait --for=condition=ready pod -l app=smartinvite-api -n ${NAMESPACE} --timeout=300s || true
+          else
+            echo "⚠️ Backend deployment not found"
+          fi
+          
+          # Wait for frontend deployment to be ready
+          echo "Checking frontend deployment..."
+          if kubectl get deployment invitelink-frontend -n ${NAMESPACE} &> /dev/null; then
+            kubectl wait --for=condition=available deployment/invitelink-frontend -n ${NAMESPACE} --timeout=300s || true
+            kubectl wait --for=condition=ready pod -l app=invitelink-frontend -n ${NAMESPACE} --timeout=300s || true
+          else
+            echo "⚠️ Frontend deployment not found"
+          fi
+          
+          # Get backend URL and verify health
+          BACKEND_IP=$(kubectl get svc smartinvite-api -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          if [ -z "$BACKEND_IP" ]; then
+            echo "⚠️ Backend service not found or no IP assigned"
+            BACKEND_URL="http://backend-not-ready"
+            BACKEND_HEALTHY=false
+          else
+            BACKEND_URL="http://${BACKEND_IP}"
+            echo "Backend URL: ${BACKEND_URL}"
+            
+            # Wait for backend health check
+            echo "Waiting for backend health check..."
+            for i in {1..30}; do
+              if curl -f -s "${BACKEND_URL}/health" > /dev/null 2>&1; then
+                echo "✅ Backend is healthy"
+                BACKEND_HEALTHY=true
+                break
+              fi
+              echo "Attempt $i/30: Backend not ready yet..."
+              sleep 10
+            done
+            if [ "${BACKEND_HEALTHY}" != "true" ]; then
+              echo "⚠️ Backend health check timeout"
+              BACKEND_HEALTHY=false
+            fi
+          fi
+          
+          # Get frontend URL and verify health
+          FRONTEND_IP=$(kubectl get svc invitelink-frontend -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+          if [ -z "$FRONTEND_IP" ]; then
+            echo "⚠️ Frontend service not found or no IP assigned"
+            FRONTEND_URL="http://frontend-not-ready"
+            FRONTEND_HEALTHY=false
+          else
+            FRONTEND_URL="http://${FRONTEND_IP}"
+            echo "Frontend URL: ${FRONTEND_URL}"
+            
+            # Wait for frontend health check
+            echo "Waiting for frontend health check..."
+            for i in {1..30}; do
+              if curl -f -s "${FRONTEND_URL}/health" > /dev/null 2>&1; then
+                echo "✅ Frontend is healthy"
+                FRONTEND_HEALTHY=true
+                break
+              fi
+              echo "Attempt $i/30: Frontend not ready yet..."
+              sleep 10
+            done
+            if [ "${FRONTEND_HEALTHY}" != "true" ]; then
+              echo "⚠️ Frontend health check timeout"
+              FRONTEND_HEALTHY=false
+            fi
+          fi
+          
+          echo "backend_url=${BACKEND_URL}" >> $GITHUB_OUTPUT
+          echo "frontend_url=${FRONTEND_URL}" >> $GITHUB_OUTPUT
+          echo "backend_healthy=${BACKEND_HEALTHY}" >> $GITHUB_OUTPUT
+          echo "frontend_healthy=${FRONTEND_HEALTHY}" >> $GITHUB_OUTPUT
+          
+          # Fail if either service is not healthy
+          if [ "${BACKEND_HEALTHY}" != "true" ] || [ "${FRONTEND_HEALTHY}" != "true" ]; then
+            echo "❌ Services are not healthy. Exiting..."
+            exit 1
+          fi
+          
+          echo "✅ Both services are healthy and ready for testing"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore E2E test dependencies
+        working-directory: ./tests/InviteLink.E2ETests
+        run: dotnet restore
+
+      - name: Build E2E tests
+        working-directory: ./tests/InviteLink.E2ETests
+        run: dotnet build --no-restore
+
+      - name: Run E2E tests
+        id: e2e
+        working-directory: ./tests/InviteLink.E2ETests
+        env:
+          BACKEND_URL: ${{ steps.urls.outputs.backend_url }}
+          FRONTEND_URL: ${{ steps.urls.outputs.frontend_url }}
+        run: |
+          # Run SpecFlow tests with detailed output
+          dotnet test --no-build --logger "trx;LogFileName=test-results.trx" --logger "console;verbosity=detailed" || echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results-${{ steps.namespace.outputs.namespace }}
+          path: |
+            tests/InviteLink.E2ETests/TestResults/**/*.trx
+            tests/InviteLink.E2ETests/TestResults/**/*.xml
+          retention-days: 30
+
+      - name: Generate test summary
+        if: always()
+        id: summary
+        run: |
+          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+          BACKEND_URL="${{ steps.urls.outputs.backend_url }}"
+          FRONTEND_URL="${{ steps.urls.outputs.frontend_url }}"
+          BACKEND_HEALTHY="${{ steps.urls.outputs.backend_healthy }}"
+          FRONTEND_HEALTHY="${{ steps.urls.outputs.frontend_healthy }}"
+          
+          # Create summary
+          cat > test-summary.md << EOF
+          ## 🧪 E2E Test Results (SpecFlow)
+          
+          **Namespace:** \`${NAMESPACE}\`
+          **Backend URL:** ${BACKEND_URL} $([ "${BACKEND_HEALTHY}" == "true" ] && echo "✅" || echo "❌")
+          **Frontend URL:** ${FRONTEND_URL} $([ "${FRONTEND_HEALTHY}" == "true" ] && echo "✅" || echo "❌")
+          **Test Run:** ${GITHUB_RUN_NUMBER}
+          
+          ### Test Status
+          EOF
+          
+          if [ -f "tests/InviteLink.E2ETests/TestResults/test-results.trx" ]; then
+            echo "✅ SpecFlow tests completed - see artifacts for detailed results" >> test-summary.md
+            
+            # Try to extract test counts from TRX file if available
+            if command -v xmllint &> /dev/null; then
+              TOTAL=$(xmllint --xpath "string(//*[local-name()='ResultSummary']/*[local-name()='Counters']/@total)" tests/InviteLink.E2ETests/TestResults/test-results.trx 2>/dev/null || echo "N/A")
+              PASSED=$(xmllint --xpath "string(//*[local-name()='ResultSummary']/*[local-name()='Counters']/@passed)" tests/InviteLink.E2ETests/TestResults/test-results.trx 2>/dev/null || echo "N/A")
+              FAILED=$(xmllint --xpath "string(//*[local-name()='ResultSummary']/*[local-name()='Counters']/@failed)" tests/InviteLink.E2ETests/TestResults/test-results.trx 2>/dev/null || echo "N/A")
+              
+              echo "" >> test-summary.md
+              echo "**Total Tests:** ${TOTAL}" >> test-summary.md
+              echo "**Passed:** ✅ ${PASSED}" >> test-summary.md
+              echo "**Failed:** ❌ ${FAILED}" >> test-summary.md
+            fi
+          else
+            echo "❌ Tests failed to generate report" >> test-summary.md
+          fi
+          
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          cat test-summary.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          cat test-summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment test results on PR
+        if: always() && steps.namespace.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = `${{ steps.summary.outputs.summary }}`;
+            
+            // Add link to artifacts
+            const artifactLink = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            const fullComment = summary + `\n\n📊 [View detailed test results](${artifactLink})\n\n_Tests run at ${new Date().toISOString()}_`;
+            
+            github.rest.issues.createComment({
+              issue_number: ${{ steps.namespace.outputs.pr_number }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: fullComment
+            });

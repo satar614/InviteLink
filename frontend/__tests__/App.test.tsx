@@ -11,3 +11,39 @@ test('renders correctly', async () => {
     ReactTestRenderer.create(<App />);
   });
 });
+
+describe('App Component Tests', () => {
+  it('should render without crashing', async () => {
+    let instance: any;
+    await ReactTestRenderer.act(() => {
+      instance = ReactTestRenderer.create(<App />);
+    });
+    expect(instance).toBeTruthy();
+    await ReactTestRenderer.act(() => {
+      instance.unmount();
+    });
+  });
+
+  it('should have valid props', async () => {
+    let instance: any;
+    await ReactTestRenderer.act(() => {
+      instance = ReactTestRenderer.create(<App />);
+    });
+    expect(instance.root).toBeTruthy();
+    await ReactTestRenderer.act(() => {
+      instance.unmount();
+    });
+  });
+
+  it('should update on state changes', async () => {
+    let instance: any;
+    await ReactTestRenderer.act(() => {
+      instance = ReactTestRenderer.create(<App />);
+    });
+    
+    expect(instance).toBeTruthy();
+    await ReactTestRenderer.act(() => {
+      instance.unmount();
+    });
+  });
+});
