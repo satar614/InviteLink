@@ -87,72 +87,40 @@ jobs:
         working-directory: ./infra
         run: terraform init
 
-      - name: Reconcile Terraform state (RG/ACR/AKS)
+      - name: Check for existing resources
         working-directory: ./infra
         run: |
-          set -e
-          echo "Reconciling Terraform state with Azure resources..."
+          echo "Checking if Azure resources already exist..."
+          RG_EXISTS=$(az group exists -n invitelink-rg 2>/dev/null || echo "false")
+          echo "Resource group exists: $RG_EXISTS"
           
-          # Check if state is empty or missing
-          STATE_SIZE=$(terraform state list 2>/dev/null | wc -l || echo "0")
-          echo "Current state resources: $STATE_SIZE"
-          
-          # Define terraform variables for import commands
-          TF_VARS="-var=subscription_id=$ARM_SUBSCRIPTION_ID -var=acr_name=invitelinkacre9c72f7a -var=resource_group_name=invitelink-rg -var=location=uksouth"
-          
-          # Always try to import RG first - it's required for everything
-          echo ""
-          echo "Step 1: Importing resource group..."
-          terraform import $TF_VARS -input=false azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg" 2>&1 || {
-            echo "RG import result code: $?"
-          }
-          
-          # Verify RG was imported
-          if terraform state list | grep -q "azurerm_resource_group.hub_rg"; then
-            echo "✓ RG successfully in state"
-          else
-            echo "✗ RG import may have failed, will refresh during plan"
-          fi
-          
-          # Import ACR
-          echo ""
-          echo "Step 2: Importing container registry..."
-          ACR_ID=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
-          if [[ ! -z "$ACR_ID" ]]; then
-            terraform import $TF_VARS -input=false azurerm_container_registry.acr "$ACR_ID" 2>&1 || {
-              echo "ACR import result code: $?"
-            }
-            if terraform state list | grep -q "azurerm_container_registry.acr"; then
-              echo "✓ ACR successfully in state"
-            else
-              echo "⚠ ACR import status uncertain"
+          if [[ "$RG_EXISTS" == "true" ]]; then
+            echo "Existing resources detected. Running state reconciliation..."
+            
+            # Define terraform variables for import commands
+            TF_VARS="-var=subscription_id=$ARM_SUBSCRIPTION_ID -var=acr_name=invitelinkacre9c72f7a -var=resource_group_name=invitelink-rg -var=location=uksouth"
+            
+            # Import RG
+            echo "Importing resource group..."
+            terraform import $TF_VARS -input=false azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg" 2>&1 || true
+            
+            # Import ACR if it exists
+            ACR_ID=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
+            if [[ ! -z "$ACR_ID" ]]; then
+              echo "Importing container registry..."
+              terraform import $TF_VARS -input=false azurerm_container_registry.acr "$ACR_ID" 2>&1 || true
+            fi
+            
+            # Import AKS if it exists
+            AKS_ID=$(az aks show -n invitelink-aks -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
+            if [[ ! -z "$AKS_ID" ]]; then
+              echo "Importing Kubernetes cluster..."
+              AKS_ID=$(echo "$AKS_ID" | sed 's|/resourcegroups/|/resourceGroups/|i')
+              terraform import $TF_VARS -input=false azurerm_kubernetes_cluster.aks "$AKS_ID" 2>&1 || true
             fi
           else
-            echo "⚠ ACR not found in Azure"
+            echo "No existing resources found. Terraform will create fresh deployment."
           fi
-          
-          # Import AKS
-          echo ""
-          echo "Step 3: Importing Kubernetes cluster..."
-          AKS_ID=$(az aks show -n invitelink-aks -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
-          if [[ ! -z "$AKS_ID" ]]; then
-            # Azure CLI returns resourcegroups in lowercase, but Terraform expects resourceGroups
-            AKS_ID=$(echo "$AKS_ID" | sed 's|/resourcegroups/|/resourceGroups/|i')
-            terraform import $TF_VARS -input=false azurerm_kubernetes_cluster.aks "$AKS_ID" 2>&1 || {
-              echo "AKS import result code: $?"
-            }
-            if terraform state list | grep -q "azurerm_kubernetes_cluster.aks"; then
-              echo "✓ AKS successfully in state"
-            else
-              echo "⚠ AKS import status uncertain"
-            fi
-          else
-            echo "⚠ AKS not found in Azure"
-          fi
-          
-          echo ""
-          echo "Final state summary:"
-          terraform state list || echo "Unable to list state"
           set +e
 
       - name: Terraform Format Check
@@ -172,63 +140,14 @@ jobs:
             echo "Reason: ${{ inputs.deployment_reason }}"
           fi
           
-          echo "Starting Terraform plan with full refresh..."
+          echo "Starting Terraform plan..."
           terraform plan \
             -input=false \
-            -refresh=true \
             -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
             -var="acr_name=invitelinkacre9c72f7a" \
             -var="resource_group_name=invitelink-rg" \
             -var="location=uksouth" \
-            -out=tfplan 2>&1 | tee /tmp/plan.log
-          
-          PLAN_EXIT=$?
-          if [ $PLAN_EXIT -ne 0 ]; then
-            echo ""
-            echo "Plan failed with exit code $PLAN_EXIT"
-            echo "Checking if this is due to resource conflicts..."
-            grep -i "already exists" /tmp/plan.log && echo "Found resource conflict - will attempt to refresh state" || true
-          fi
-          exit $PLAN_EXIT
-
-      - name: Recover from import failures (if needed)
-        if: failure()
-        working-directory: ./infra
-        continue-on-error: true
-        run: |
-          echo "Plan failed - attempting to recover by importing missing resources..."
-          
-          # Define terraform variables for import commands
-          TF_VARS="-var=subscription_id=$ARM_SUBSCRIPTION_ID -var=acr_name=invitelinkacre9c72f7a -var=resource_group_name=invitelink-rg -var=location=uksouth"
-          
-          # Try importing RG with output suppression
-          echo "Attempting RG import..."
-          terraform import $TF_VARS -input=false azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg" >/dev/null 2>&1 && echo "✓ RG imported" || echo "⚠ RG import failed or already exists"
-          
-          # Try importing ACR with output suppression  
-          echo "Attempting ACR import..."
-          ACR_ID=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
-          if [[ ! -z "$ACR_ID" ]]; then
-            terraform import $TF_VARS -input=false azurerm_container_registry.acr "$ACR_ID" >/dev/null 2>&1 && echo "✓ ACR imported" || echo "⚠ ACR import failed or already exists"
-          fi
-          
-          # Try importing AKS with output suppression
-          echo "Attempting AKS import..."
-          AKS_ID=$(az aks show -n invitelink-aks -g invitelink-rg --query id -o tsv 2>/dev/null || echo "")
-          if [[ ! -z "$AKS_ID" ]]; then
-            # Azure CLI returns resourcegroups in lowercase, but Terraform expects resourceGroups
-            AKS_ID=$(echo "$AKS_ID" | sed 's|/resourcegroups/|/resourceGroups/|i')
-            terraform import $TF_VARS -input=false azurerm_kubernetes_cluster.aks "$AKS_ID" >/dev/null 2>&1 && echo "✓ AKS imported" || echo "⚠ AKS import failed or already exists"
-          fi
-          
-          echo "Retry plan after recovery..."
-          terraform plan \
-            $TF_VARS \
-            -input=false \
-            -refresh=true \
             -out=tfplan
-          
-          echo "Recovery plan created successfully"
 
       - name: Terraform Apply
         # Temporarily disabled for testing - uncomment to restrict to main branch only
@@ -236,15 +155,7 @@ jobs:
         #   (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
         #   (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
         working-directory: ./infra
-        run: |
-          echo "Applying Terraform configuration with full state refresh..."
-          terraform apply -input=false -refresh=true -auto-approve tfplan 2>&1 | tee /tmp/apply.log
-          
-          # Verify state was updated
-          echo ""
-          echo "Final state summary:"
-          terraform state list | head -20 || echo "State list failed - checking with show instead"
-          terraform show -json 2>/dev/null | jq '.values.root_module.resources | length' || echo "Could not determine resource count"
+        run: terraform apply -input=false -auto-approve tfplan
 
       - name: Terraform Destroy
         if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
