@@ -1,7 +1,20 @@
-name: Deprecated: Deploy (moved to deploy-apps.yml)
+name: Deploy Applications
+
+run-name: Deploy Applications - ${{ github.event_name == 'pull_request' && github.event.pull_request.title || github.ref_name }}
 
 on:
-  workflow_call:
+  push:
+    branches:
+      - main
+    paths:
+      - 'k8s/**'
+      - '.github/workflows/deploy-apps.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'k8s/**'
+      - '.github/workflows/deploy-apps.yml'
 
 env:
   REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
