@@ -92,26 +92,37 @@ jobs:
         run: |
           echo "Reconciling Terraform state with Azure resources..."
           
-          # Always attempt to import the RG; will succeed if not in state, fail gracefully if already present
-          echo "Attempting to import resource group..."
-          terraform import -input=false azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg" || echo "RG already in state or import failed (will retry in plan)"
-          
-          # Clean up missing resources from state
-          echo "Checking for stale resources in state..."
-          
-          # Remove ACR if it doesn't exist in Azure
-          ACR_EXISTS=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query name -o tsv 2>/dev/null || true)
-          if [[ -z "$ACR_EXISTS" ]]; then
-            echo "ACR not found in Azure. Removing from state."
-            terraform state list | grep -q 'azurerm_container_registry.acr' && terraform state rm azurerm_container_registry.acr || true
+          # Check if state is empty or missing - force refresh
+          STATE_SIZE=$(terraform state list 2>/dev/null | wc -l || echo "0")
+          if [[ "$STATE_SIZE" -lt 1 ]]; then
+            echo "State file is empty or missing - will force full refresh in plan"
+            export TF_LOG=DEBUG
           fi
           
-          # Remove AKS if it doesn't exist in Azure
-          AKS_EXISTS=$(az aks show -n invitelink-aks -g invitelink-rg --query name -o tsv 2>/dev/null || true)
-          if [[ -z "$AKS_EXISTS" ]]; then
-            echo "AKS not found in Azure. Removing from state."
-            terraform state list | grep -q 'azurerm_kubernetes_cluster.aks' && terraform state rm azurerm_kubernetes_cluster.aks || true
+          # Import RG - this will re-sync if state was deleted
+          echo "Syncing resource group with Azure..."
+          terraform import -input=false azurerm_resource_group.hub_rg "/subscriptions/26105aab-ded4-4e66-a408-309b2e23092c/resourceGroups/invitelink-rg" 2>&1 | grep -E "(Error importing|Successfully imported|already exists)" || true
+          
+          # Import ACR if it exists and not already in state
+          echo "Syncing container registry with Azure..."
+          ACR_ID=$(az acr show -n invitelinkacre9c72f7a -g invitelink-rg --query id -o tsv 2>/dev/null || true)
+          if [[ ! -z "$ACR_ID" ]]; then
+            terraform import -input=false azurerm_container_registry.acr "$ACR_ID" 2>&1 | grep -E "(Error importing|Successfully imported|already exists)" || true
+          else
+            echo "ACR not found in Azure"
           fi
+          
+          # Import AKS if it exists and not already in state
+          echo "Syncing Kubernetes cluster with Azure..."
+          AKS_ID=$(az aks show -n invitelink-aks -g invitelink-rg --query id -o tsv 2>/dev/null || true)
+          if [[ ! -z "$AKS_ID" ]]; then
+            terraform import -input=false azurerm_kubernetes_cluster.aks "$AKS_ID" 2>&1 | grep -E "(Error importing|Successfully imported|already exists)" || true
+          else
+            echo "AKS not found in Azure"
+          fi
+          
+          echo "State reconciliation complete"
+          terraform state list || echo "State is still empty"
 
       - name: Terraform Format Check
         working-directory: ./infra
@@ -137,7 +148,10 @@ jobs:
             -var="acr_name=invitelinkacre9c72f7a" \
             -var="resource_group_name=invitelink-rg" \
             -var="location=uksouth" \
-            -out=tfplan
+            -out=tfplan 2>&1 | tee /tmp/plan.log
+          
+          # If plan shows state rebuilding, log it
+          grep -i "refresh\|import\|state" /tmp/plan.log || true
 
       - name: Terraform Apply
         # Temporarily disabled for testing - uncomment to restrict to main branch only
@@ -145,7 +159,15 @@ jobs:
         #   (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
         #   (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
         working-directory: ./infra
-        run: terraform apply -input=false -refresh=true -auto-approve tfplan
+        run: |
+          echo "Applying Terraform configuration with full state refresh..."
+          terraform apply -input=false -refresh=true -auto-approve tfplan 2>&1 | tee /tmp/apply.log
+          
+          # Verify state was updated
+          echo ""
+          echo "Final state summary:"
+          terraform state list | head -20 || echo "State list failed - checking with show instead"
+          terraform show -json 2>/dev/null | jq '.values.root_module.resources | length' || echo "Could not determine resource count"
 
       - name: Terraform Destroy
         if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
