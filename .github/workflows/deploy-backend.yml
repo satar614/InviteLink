@@ -1,5 +1,5 @@
-name: Backend: Build & Push
-run-name: Backend: Build & Push - ${{ github.event.pull_request.title || github.ref_name }}
+name: "Backend: Build & Push"
+run-name: "Backend: Build & Push - ${{ github.event.pull_request.title || github.ref_name }}"
 
 on:
   push:
