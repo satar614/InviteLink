@@ -24,6 +24,7 @@ on:
           - centralus
           - westeurope
           - northeurope
+          - uksouth
       container_name:
         description: 'Blob container name'
         required: false
