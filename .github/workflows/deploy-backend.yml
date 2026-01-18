@@ -1,5 +1,5 @@
 name: Deploy Backend
-run-name: Deploy Backend - ${{ github.ref_name }}
+run-name: Deploy Backend - ${{ github.event.pull_request.title || github.ref_name }}
 
 on:
   push:
