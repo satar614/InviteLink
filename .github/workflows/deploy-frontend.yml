@@ -64,34 +64,15 @@ jobs:
       - name: Fetch ACR credentials
         id: acr
         run: |
-          # Try to get ACR from resource group first, then subscription-wide
-          ACR_LOGIN_SERVER=$(az acr list --resource-group invitelink-rg --query "[0].loginServer" -o tsv 2>/dev/null || true)
-          if [[ -z "$ACR_LOGIN_SERVER" ]]; then
-            ACR_LOGIN_SERVER=$(az acr list --query "[0].loginServer" -o tsv 2>/dev/null || true)
-          fi
-          
-          # Fallback to hardcoded ACR name if no registry found
-          if [[ -z "$ACR_LOGIN_SERVER" ]]; then
-            echo "Warning: No ACR found via az acr list, using hardcoded ACR name"
-            ACR_LOGIN_SERVER="invitelinkacre9c72f7a.azurecr.io"
-          fi
+          ACR_LOGIN_SERVER="invitelinkacre9c72f7a.azurecr.io"
+          ACR_NAME="invitelinkacre9c72f7a"
           
           echo "login_server=$ACR_LOGIN_SERVER" >> $GITHUB_OUTPUT
-          echo "Using ACR: $ACR_LOGIN_SERVER"
           
-          # Derive ACR name from login server
-          ACR_NAME=${ACR_LOGIN_SERVER%%.azurecr.io}
-          echo "ACR Name: $ACR_NAME"
-          
-          # Fetch credentials
-          CREDS_JSON=$(az acr credential show -n "$ACR_NAME" 2>/dev/null || echo '{}')
-          ACR_USERNAME=$(echo "$CREDS_JSON" | jq -r '.username // empty')
-          ACR_PASSWORD=$(echo "$CREDS_JSON" | jq -r '.passwords[0].value // empty')
-          
-          if [[ -z "$ACR_USERNAME" || -z "$ACR_PASSWORD" ]]; then
-            echo "Error: Could not fetch ACR credentials for $ACR_NAME"
-            exit 1
-          fi
+          # Fetch credentials for the ACR
+          CREDS_JSON=$(az acr credential show -n "$ACR_NAME")
+          ACR_USERNAME=$(echo "$CREDS_JSON" | jq -r '.username')
+          ACR_PASSWORD=$(echo "$CREDS_JSON" | jq -r '.passwords[0].value')
           
           echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
           echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
