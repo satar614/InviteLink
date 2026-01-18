@@ -125,25 +125,9 @@ echo "Your workflows can now authenticate with Azure."
 echo ""
 
 # Prompt for AKS cluster information
-echo "Now you need to provide AKS cluster information..."
-echo ""
-read -p "Enter your AKS cluster name: " AKS_CLUSTER_NAME
-read -p "Enter your AKS resource group: " AKS_RESOURCE_GROUP
-
-if [ -n "$AKS_CLUSTER_NAME" ] && [ -n "$AKS_RESOURCE_GROUP" ]; then
-    echo ""
-    echo "Setting AKS secrets..."
-    echo "$AKS_CLUSTER_NAME" | gh secret set AKS_CLUSTER_NAME --repo "$REPO"
-    echo "✅ AKS_CLUSTER_NAME set"
-    
-    echo "$AKS_RESOURCE_GROUP" | gh secret set AKS_RESOURCE_GROUP --repo "$REPO"
-    echo "✅ AKS_RESOURCE_GROUP set"
-    
-    echo ""
-    echo "========================================="
-    echo "✅ All secrets configured!"
-    echo "========================================="
-fi
+echo "========================================="
+echo "✅ All Azure secrets configured!"
+echo "========================================="
 
 echo ""
 echo "Summary of setup:"
@@ -151,8 +135,6 @@ echo "  Subscription: $SUBSCRIPTION_ID"
 echo "  Tenant: $TENANT_ID"
 echo "  Service Principal: $SP_NAME"
 echo "  Client ID: $CLIENT_ID"
-if [ -n "$AKS_CLUSTER_NAME" ]; then
-    echo "  AKS Cluster: $AKS_CLUSTER_NAME"
-    echo "  AKS Resource Group: $AKS_RESOURCE_GROUP"
-fi
+echo ""
+echo "Workflows can now authenticate with Azure!"
 echo ""
