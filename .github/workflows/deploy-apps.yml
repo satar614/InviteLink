@@ -184,12 +184,14 @@ jobs:
           IMAGE="${{ steps.backend_image.outputs.image }}"
           IMAGE_REPO="${IMAGE%:*}"
           IMAGE_TAG="${IMAGE##*:}"
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
           
-          echo "Deploying backend: $IMAGE_REPO:$IMAGE_TAG"
+          echo "Deploying backend: $IMAGE_REPO:$IMAGE_TAG to namespace: $NAMESPACE"
           helm upgrade --install smartinvite-api ./k8s/charts/backend \
-            --namespace ${{ needs.prepare.outputs.namespace }} \
+            --namespace "$NAMESPACE" \
             --set image.repository="$IMAGE_REPO" \
             --set image.tag="$IMAGE_TAG" \
+            --set namespace="$NAMESPACE" \
             --wait --timeout 5m
 
       - name: Deploy frontend with Helm
@@ -197,12 +199,14 @@ jobs:
           IMAGE="${{ steps.frontend_image.outputs.image }}"
           IMAGE_REPO="${IMAGE%:*}"
           IMAGE_TAG="${IMAGE##*:}"
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
           
-          echo "Deploying frontend: $IMAGE_REPO:$IMAGE_TAG"
+          echo "Deploying frontend: $IMAGE_REPO:$IMAGE_TAG to namespace: $NAMESPACE"
           helm upgrade --install invitelink-frontend ./k8s/charts/frontend \
-            --namespace ${{ needs.prepare.outputs.namespace }} \
+            --namespace "$NAMESPACE" \
             --set image.repository="$IMAGE_REPO" \
             --set image.tag="$IMAGE_TAG" \
+            --set namespace="$NAMESPACE" \
             --wait --timeout 5m
 
       - name: Get deployment status
