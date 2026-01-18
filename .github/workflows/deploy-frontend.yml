@@ -1,5 +1,5 @@
-name: Build and Push to ACR
-run-name: Build and Push to ACR (Frontend) - ${{ github.event.pull_request.title || github.ref_name }}
+name: Frontend: Build & Push
+run-name: Frontend: Build & Push - ${{ github.event.pull_request.title || github.ref_name }}
 
 on:
   push:
