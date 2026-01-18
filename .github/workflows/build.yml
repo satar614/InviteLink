@@ -122,7 +122,7 @@ jobs:
       # Upload test artifacts
       - name: Upload backend test results
         if: inputs.component == 'backend' && always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: backend-test-results-${{ github.run_number }}
           path: test-results/
@@ -130,7 +130,7 @@ jobs:
 
       - name: Upload frontend test results
         if: inputs.component == 'frontend' && always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-test-results-${{ github.run_number }}
           path: |
