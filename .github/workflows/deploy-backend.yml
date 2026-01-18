@@ -102,17 +102,8 @@ jobs:
           
           echo "uri=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
-      - name: Build Docker image (PR)
-        id: image_pr
-        if: |
-          github.event_name == 'pull_request'
-        run: |
-          TAG="${{ steps.tag.outputs.tag }}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Built backend image with tag: $TAG (not pushed to ACR on PRs)"
-
       - name: Push summary
         run: |
           echo "## 🔨 Backend Build & Push Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image**: \`${{ steps.image.outputs.uri || steps.image_pr.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ steps.image.outputs.uri }}\`" >> $GITHUB_STEP_SUMMARY
