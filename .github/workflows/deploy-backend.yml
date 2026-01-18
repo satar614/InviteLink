@@ -44,6 +44,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Determine namespace
         id: namespace
@@ -68,9 +70,10 @@ jobs:
               echo "should_deploy=true" >> $GITHUB_OUTPUT
               echo "reason=pr_opened" >> $GITHUB_OUTPUT
             else
-              # Check if backend files changed
-              git fetch origin ${{ github.base_ref }}
-              if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q '^backend/'; then
+              # Check if backend files changed between PR base and head
+              BASE_SHA="${{ github.event.pull_request.base.sha }}"
+              HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+              if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -q '^backend/'; then
                 echo "should_deploy=true" >> $GITHUB_OUTPUT
                 echo "reason=backend_changes" >> $GITHUB_OUTPUT
               else
