@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -73,6 +74,8 @@ jobs:
           IMAGE_URI="${{ needs.build-backend.outputs.image_uri }}"
           IMAGE_REPO="${IMAGE_URI%:*}"
           IMAGE_TAG="${IMAGE_URI##*:}"
+          
+          echo "Deploying backend with image: $IMAGE_REPO:$IMAGE_TAG"
           helm upgrade --install smartinvite-api ./k8s/charts/backend \
             --namespace ${{ needs.prepare.outputs.namespace }} \
             --set image.repository="$IMAGE_REPO" \
@@ -84,6 +87,8 @@ jobs:
           IMAGE_URI="${{ needs.build-frontend.outputs.image_uri }}"
           IMAGE_REPO="${IMAGE_URI%:*}"
           IMAGE_TAG="${IMAGE_URI##*:}"
+          
+          echo "Deploying frontend with image: $IMAGE_REPO:$IMAGE_TAG"
           helm upgrade --install invitelink-frontend ./k8s/charts/frontend \
             --namespace ${{ needs.prepare.outputs.namespace }} \
             --set image.repository="$IMAGE_REPO" \

@@ -90,10 +90,6 @@ jobs:
 
       - name: Build and push Docker image
         id: image
-        if: |
-          github.ref == 'refs/heads/main' ||
-          github.event_name == 'workflow_dispatch' ||
-          github.event_name == 'workflow_call'
         run: |
           LOGIN_SERVER="${{ steps.acr.outputs.login_server }}"
           TAG="${{ steps.tag.outputs.tag }}"
