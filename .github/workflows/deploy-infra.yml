@@ -121,9 +121,6 @@ jobs:
             -out=tfplan
 
       - name: Terraform Apply
-        if: |
-          (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
-          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
         working-directory: ./infra
         run: terraform apply -input=false -auto-approve tfplan
 
