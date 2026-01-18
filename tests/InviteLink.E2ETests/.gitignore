@@ -1,0 +1,17 @@
+## Build outputs
+bin/
+obj/
+
+## Test results
+TestResults/
+*.trx
+*.xml
+
+## SpecFlow generated files
+*.feature.cs
+
+## IDE
+.vs/
+.vscode/
+*.user
+*.suo

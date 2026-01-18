@@ -152,31 +152,28 @@ jobs:
           
           echo "✅ Both services are healthy and ready for testing"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
         with:
-          node-version: '18'
+          dotnet-version: '8.0.x'
 
-      - name: Install Playwright and dependencies
-        working-directory: ./tests
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+      - name: Restore E2E test dependencies
+        working-directory: ./tests/InviteLink.E2ETests
+        run: dotnet restore
+
+      - name: Build E2E tests
+        working-directory: ./tests/InviteLink.E2ETests
+        run: dotnet build --no-restore
 
       - name: Run E2E tests
         id: e2e
-        working-directory: ./tests
+        working-directory: ./tests/InviteLink.E2ETests
         env:
           BACKEND_URL: ${{ steps.urls.outputs.backend_url }}
           FRONTEND_URL: ${{ steps.urls.outputs.frontend_url }}
         run: |
-          # Run tests and capture exit code
-          npx cucumber-js || echo "exit_code=$?" >> $GITHUB_OUTPUT
-          
-          # Generate HTML report
-          if [ -f "cucumber-report.json" ]; then
-            echo "Generating HTML report..."
-          fi
+          # Run SpecFlow tests with detailed output
+          dotnet test --no-build --logger "trx;LogFileName=test-results.trx" --logger "console;verbosity=detailed" || echo "exit_code=$?" >> $GITHUB_OUTPUT
 
       - name: Upload test results
         if: always()
@@ -184,9 +181,8 @@ jobs:
         with:
           name: e2e-test-results-${{ steps.namespace.outputs.namespace }}
           path: |
-            tests/cucumber-report.json
-            tests/test-results/
-            tests/playwright-report/
+            tests/InviteLink.E2ETests/TestResults/**/*.trx
+            tests/InviteLink.E2ETests/TestResults/**/*.xml
           retention-days: 30
 
       - name: Generate test summary
@@ -201,7 +197,7 @@ jobs:
           
           # Create summary
           cat > test-summary.md << EOF
-          ## 🧪 E2E Test Results
+          ## 🧪 E2E Test Results (SpecFlow)
           
           **Namespace:** \`${NAMESPACE}\`
           **Backend URL:** ${BACKEND_URL} $([ "${BACKEND_HEALTHY}" == "true" ] && echo "✅" || echo "❌")
@@ -211,8 +207,20 @@ jobs:
           ### Test Status
           EOF
           
-          if [ -f "tests/cucumber-report.json" ]; then
-            echo "✅ Tests completed - see artifacts for detailed results" >> test-summary.md
+          if [ -f "tests/InviteLink.E2ETests/TestResults/test-results.trx" ]; then
+            echo "✅ SpecFlow tests completed - see artifacts for detailed results" >> test-summary.md
+            
+            # Try to extract test counts from TRX file if available
+            if command -v xmllint &> /dev/null; then
+              TOTAL=$(xmllint --xpath "string(//*[local-name()='ResultSummary']/*[local-name()='Counters']/@total)" tests/InviteLink.E2ETests/TestResults/test-results.trx 2>/dev/null || echo "N/A")
+              PASSED=$(xmllint --xpath "string(//*[local-name()='ResultSummary']/*[local-name()='Counters']/@passed)" tests/InviteLink.E2ETests/TestResults/test-results.trx 2>/dev/null || echo "N/A")
+              FAILED=$(xmllint --xpath "string(//*[local-name()='ResultSummary']/*[local-name()='Counters']/@failed)" tests/InviteLink.E2ETests/TestResults/test-results.trx 2>/dev/null || echo "N/A")
+              
+              echo "" >> test-summary.md
+              echo "**Total Tests:** ${TOTAL}" >> test-summary.md
+              echo "**Passed:** ✅ ${PASSED}" >> test-summary.md
+              echo "**Failed:** ❌ ${FAILED}" >> test-summary.md
+            fi
           else
             echo "❌ Tests failed to generate report" >> test-summary.md
           fi

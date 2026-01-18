@@ -1,0 +1,19 @@
+{
+  "stepAssemblies": [
+    {
+      "assembly": "InviteLink.E2ETests"
+    }
+  ],
+  "bindingCulture": {
+    "name": "en-US"
+  },
+  "runtime": {
+    "stopAtFirstError": false,
+    "missingOrPendingStepsOutcome": "Inconclusive"
+  },
+  "trace": {
+    "traceSuccessfulSteps": true,
+    "traceTimings": true,
+    "minTracedDuration": "0:0:0.1"
+  }
+}

@@ -1,80 +1,103 @@
-# InviteLink End-to-End Tests
+# InviteLink E2E Tests
 
-Playwright-based BDD tests using SpecFlow (Cucumber) for InviteLink frontend.
+SpecFlow BDD tests for InviteLink using .NET 8.0 and NUnit.
 
-## Test Features
+## Prerequisites
 
-- **RSVP Flow** - Guest RSVP process from start to finish
-- **QR Code Scanning** - QR code decoding, scanning, and check-in
-- **Mobile Responsiveness** - Mobile device testing
-- **Validation** - Form validation and error handling
+- .NET 8.0 SDK
+- Backend and Frontend services running
 
-## Setup
+## Test Structure
 
-```bash
-cd tests
-npm install
+```
+InviteLink.E2ETests/
+├── Features/              # Gherkin feature files
+│   ├── RSVP.feature
+│   └── QRCode.feature
+├── StepDefinitions/       # C# step bindings
+│   ├── RSVPStepDefinitions.cs
+│   └── QRCodeStepDefinitions.cs
+├── Support/               # Test configuration and helpers
+│   └── TestConfiguration.cs
+└── specflow.json          # SpecFlow configuration
 ```
 
 ## Running Tests
 
 ### Run all tests
 ```bash
-npm test
+cd tests/InviteLink.E2ETests
+dotnet test
 ```
 
-### Run tests in headed mode (see browser)
+### Run with verbosity
 ```bash
-npm run test:headed
+dotnet test --logger "console;verbosity=detailed"
 ```
 
-### Run tests in debug mode
+### Run specific feature
 ```bash
-npm run test:debug
+dotnet test --filter "FullyQualifiedName~RSVP"
 ```
 
-### Generate HTML report
+### Run with environment variables
 ```bash
-npm run test:report
+BACKEND_URL=http://your-backend:8080 FRONTEND_URL=http://your-frontend:3000 dotnet test
 ```
-
-## Test Structure
-
-- `Features/` - Gherkin feature files (.feature)
-- `Steps/` - Step implementation files (.steps.ts)
 
 ## Environment Variables
 
-- `APP_URL` - Application URL (default: http://localhost:3000)
-- `PLAYWRIGHT_HEADED` - Set to '1' to run in headed mode
+- `BACKEND_URL` - Backend API URL (default: http://localhost:8080)
+- `FRONTEND_URL` - Frontend URL (default: http://localhost:3000)
+- `CI` - Set to indicate running in CI environment
 
-## Feature Files
+## Features
 
-### rsvp.feature
-Tests the complete RSVP workflow:
-- Home page access
-- QR code scanning
-- Form filling
-- Submission
-- Confirmation page
-- Error handling
-- Mobile responsiveness
+### RSVP Flow
+Tests the complete guest RSVP workflow:
+- Valid RSVP submission
+- Missing required fields validation
+- RSVP confirmation retrieval
 
-### qrcode.feature
+### QR Code Scanning
 Tests QR code scanning and check-in:
 - Valid QR code scanning
 - Invalid QR code handling
-- Check-in process
-- Multiple guest check-in
-- Duplicate check-in prevention
+- Guest check-in process
 
 ## CI/CD Integration
 
-Tests run in the GitHub Actions pipeline:
-1. Frontend builds
-2. Unit tests run
-3. Application starts
-4. E2E tests execute
-5. Reports generated
+Tests run in the GitHub Actions E2E workflow after deployments complete:
+1. Backend and Frontend deploy
+2. Services become healthy
+3. E2E tests execute against deployed environment
+4. Results posted to PR
 
-See `.github/workflows/deploy-frontend.yml` for pipeline configuration.
+See `.github/workflows/e2e-tests.yml` for pipeline configuration.
+
+## Writing New Tests
+
+### Add a new feature:
+1. Create a `.feature` file in `Features/`
+2. Write scenarios in Gherkin syntax
+3. Generate step definitions (SpecFlow will help)
+4. Implement step bindings in `StepDefinitions/`
+
+### Example:
+```gherkin
+Feature: My Feature
+  Scenario: My scenario
+    Given some precondition
+    When I perform an action
+    Then I expect a result
+```
+
+## Test Reports
+
+Test results are output in TRX format and can be uploaded as artifacts in CI/CD pipelines.
+
+To generate HTML reports, use a tool like `ReportGenerator`:
+```bash
+dotnet test --logger "trx;LogFileName=test-results.trx"
+reportgenerator -reports:test-results.trx -targetdir:reports
+```
