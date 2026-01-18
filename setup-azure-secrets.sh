@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Complete Azure Setup Script for GitHub Actions CI/CD
-# This script sets up all necessary Azure resources and GitHub secrets for full CI/CD pipeline
+# Azure Service Principal Setup Script for GitHub Actions CI/CD
+# This script creates a service principal and sets up GitHub secrets
+# Infrastructure deployment (ACR, AKS, etc.) is handled by the deploy-infra workflow
 
 set -e
 
@@ -15,10 +16,6 @@ NC='\033[0m' # No Color
 # Default values (can be overridden)
 SUBSCRIPTION_ID="${SUBSCRIPTION_ID:-}"
 REPO="${REPO:-}"
-RESOURCE_GROUP="${RESOURCE_GROUP:-}"
-LOCATION="${LOCATION:-eastus}"
-REGISTRY_NAME="${REGISTRY_NAME:-}"
-AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-invitelink-aks}"
 SP_NAME="InviteLinkGitHubActions"
 
 # Functions
@@ -85,40 +82,9 @@ if [ -z "$REPO" ]; then
     read -p "Enter repository (owner/repo): " REPO
 fi
 
-# Get Resource Group
-if [ -z "$RESOURCE_GROUP" ]; then
-    read -p "Enter resource group name [invitelink-rg]: " RESOURCE_GROUP
-    RESOURCE_GROUP="${RESOURCE_GROUP:-invitelink-rg}"
-fi
-
-# Get Registry Name
-if [ -z "$REGISTRY_NAME" ]; then
-    read -p "Enter container registry name [invitelinkregistry]: " REGISTRY_NAME
-    REGISTRY_NAME="${REGISTRY_NAME:-invitelinkregistry}"
-fi
-
-# Get AKS Cluster Name
-if [ -z "$AKS_CLUSTER_NAME" ]; then
-    read -p "Enter AKS cluster name [invitelink-aks]: " AKS_CLUSTER_NAME
-    AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-invitelink-aks}"
-fi
-
-# Validate registry name (must be lowercase alphanumeric only)
-if ! [[ "$REGISTRY_NAME" =~ ^[a-z0-9]+$ ]]; then
-    print_error "Registry name must contain only lowercase alphanumeric characters"
-    exit 1
-fi
-
-# Validate cluster name
-if ! [[ "$AKS_CLUSTER_NAME" =~ ^[a-z0-9-]+$ ]]; then
-    print_error "Cluster name must contain only lowercase alphanumeric characters and hyphens"
-    exit 1
-fi
-
 print_info "Configuration:"
 echo "  Subscription: $SUBSCRIPTION_ID"
 echo "  Repository: $REPO"
-echo "  Resource Group: $RESOURCE_GROUP"
 echo "  Container Registry: $REGISTRY_NAME"
 echo "  Location: $LOCATION"
 echo "  AKS Cluster: $AKS_CLUSTER_NAME"
@@ -149,41 +115,6 @@ fi
 TENANT_ID=$(az account show --query tenantId -o tsv)
 print_success "Authenticated with subscription: $SUBSCRIPTION_ID"
 print_info "Tenant ID: $TENANT_ID"
-
-# Create Resource Group
-print_header "Creating Azure Resources"
-
-echo "Creating resource group: $RESOURCE_GROUP"
-az group create --name "$RESOURCE_GROUP" --location "$LOCATION" > /dev/null 2>&1 || print_warning "Resource group may already exist"
-print_success "Resource group ready"
-
-# Create Storage Account (for Terraform state)
-STORAGE_ACCOUNT="${RESOURCE_GROUP}storage"
-echo ""
-echo "Creating storage account for Terraform state: $STORAGE_ACCOUNT"
-az storage account create \
-    --name "$STORAGE_ACCOUNT" \
-    --resource-group "$RESOURCE_GROUP" \
-    --location "$LOCATION" \
-    --sku Standard_LRS \
-    --kind StorageV2 > /dev/null 2>&1 || print_warning "Storage account may already exist"
-print_success "Storage account ready"
-
-# Create Container Registry
-echo ""
-echo "Creating container registry: $REGISTRY_NAME"
-az acr create \
-    --resource-group "$RESOURCE_GROUP" \
-    --name "$REGISTRY_NAME" \
-    --sku Basic \
-    --location "$LOCATION" > /dev/null 2>&1 || print_warning "Container registry may already exist"
-print_success "Container registry ready"
-
-# Get ACR credentials
-ACR_LOGIN_SERVER=$(az acr show --resource-group "$RESOURCE_GROUP" --name "$REGISTRY_NAME" --query loginServer -o tsv)
-ACR_USERNAME=$(az acr credential show --resource-group "$RESOURCE_GROUP" --name "$REGISTRY_NAME" --query username -o tsv)
-ACR_PASSWORD=$(az acr credential show --resource-group "$RESOURCE_GROUP" --name "$REGISTRY_NAME" --query passwords[0].value -o tsv)
-print_info "ACR Login Server: $ACR_LOGIN_SERVER"
 
 # Create Service Principal
 print_header "Creating Service Principal for GitHub Actions"
@@ -229,33 +160,19 @@ echo "Setting secrets in GitHub repository: $REPO"
 echo "  • AZURE_CLIENT_SECRET"
 echo "$CLIENT_SECRET" | gh secret set AZURE_CLIENT_SECRET --repo "$REPO"
 
-# Set ACR credentials
-echo "  • ACR_LOGIN_SERVER"
-echo "$ACR_LOGIN_SERVER" | gh secret set ACR_LOGIN_SERVER --repo "$REPO"
-
-echo "  • ACR_USERNAME"
-echo "$ACR_USERNAME" | gh secret set ACR_USERNAME --repo "$REPO"
-
-echo "  • ACR_PASSWORD"
-echo "$ACR_PASSWORD" | gh secret set ACR_PASSWORD --repo "$REPO"
-
 print_success "All secrets set in GitHub"
 
 # Save configuration to file
 CONFIG_FILE="/tmp/azure_setup_config.txt"
 cat > "$CONFIG_FILE" << EOF
-# Azure Setup Configuration
+# Azure Service Principal Configuration
 # Generated: $(date)
 
 SUBSCRIPTION_ID=$SUBSCRIPTION_ID
 TENANT_ID=$TENANT_ID
 CLIENT_ID=$CLIENT_ID
-RESOURCE_GROUP=$RESOURCE_GROUP
-REGISTRY_NAME=$REGISTRY_NAME
-ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER
-AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME
-LOCATION=$LOCATION
 REPO=$REPO
+SP_NAME=$SP_NAME
 EOF
 
 # Final Summary
@@ -265,37 +182,27 @@ echo -e "${GREEN}✅ Azure infrastructure and GitHub secrets configured${NC}"
 echo ""
 echo "Configuration saved to: $CONFIG_FILE"
 echo ""
-echo -e "${BLUE}Summary of Resources Created:${NC}"
-echo "  Resource Group: $RESOURCE_GROUP"
-echo "  Storage Account: $STORAGE_ACCOUNT"
-echo "  Container Registry: $REGISTRY_NAME"
-echo "  Registry Server: $ACR_LOGIN_SERVER"
-echo "  AKS Cluster Name: $AKS_CLUSTER_NAME"
+echo -e "${BLUE}SumService principal created and GitHub secrets configured${NC}"
 echo ""
-echo -e "${BLUE}GitHub Secrets Set:${NC}"
-echo "  • AZURE_CLIENT_SECRET (Client Secret)"
-echo "  • ACR_LOGIN_SERVER"
-echo "  • ACR_USERNAME"
-echo "  • ACR_PASSWORD"
+echo "Configuration saved to: $CONFIG_FILE"
 echo ""
-echo -e "${BLUE}Hardcoded in Workflows (Update .github/workflows/*.yml):${NC}"
-echo "  SUBSCRIPTION_ID=$SUBSCRIPTION_ID"
-echo "  TENANT_ID=$TENANT_ID"
-echo "  CLIENT_ID=$CLIENT_ID"
-echo "  AKS_CLUSTER_NAME=$AKS_CLUSTER_NAME"
-echo "  AKS_RESOURCE_GROUP=$RESOURCE_GROUP"
+echo -e "${BLUE}Service Principal Details:${NC}"
+echo "  Name: $SP_NAME"
+echo "  Client ID: $CLIENT_ID"
+echo "  Subscription: $SUBSCRIPTION_ID"
+echo "  Tenant: $TENANT_ID"
+echo ""
+echo -e "${BLUE}GitHub Secret Set:${NC}"
+echo "  • AZURE_CLIENT_SECRET"
+echo ""
+echo -e "${BLUE}Update these values in .github/workflows/*.yml:${NC}"
+echo "  clientId: \"$CLIENT_ID\""
+echo "  subscriptionId: \"$SUBSCRIPTION_ID\""
+echo "  tenantId: \"$TENANT_ID\""
 echo ""
 echo -e "${BLUE}Next Steps:${NC}"
-echo "  1. Update workflow files with hardcoded values:"
-echo "     - .github/workflows/deploy-backend.yml"
-echo "     - .github/workflows/deploy-infra.yml"
-echo "     Replace placeholder values with the ones above"
+echo "  1. Update workflow files (.github/workflows/deploy-*.yml) with the hardcoded values above"
+echo "  2. Run the deploy-infra workflow to create Azure infrastructure (ACR, AKS, etc.)"
+echo "  3. The service principal has Contributor access to deploy resources"
 echo ""
-echo "  2. Create AKS Cluster (optional - can be created via Terraform):"
-echo "     az aks create --resource-group $RESOURCE_GROUP --name $AKS_CLUSTER_NAME --node-count 1"
-echo ""
-echo "  3. Push changes to trigger CI/CD pipeline:"
-echo "     git push origin your-branch"
-echo ""
-echo "Configuration details saved to: $CONFIG_FILE"
-echo ""
+echo "Configuration
