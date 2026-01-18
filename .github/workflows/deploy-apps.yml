@@ -176,6 +176,31 @@ jobs:
             kubectl create namespace "$NAMESPACE"
           fi
 
+      - name: Create ACR pull secret
+        run: |
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          ACR_NAME="invitelinkacre9c72f7a"
+          ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+          
+          # Get ACR credentials
+          ACR_USERNAME=$(az acr credential show -n "$ACR_NAME" --query username -o tsv)
+          ACR_PASSWORD=$(az acr credential show -n "$ACR_NAME" --query passwords[0].value -o tsv)
+          
+          # Check if secret already exists
+          if kubectl get secret acr-secret -n "$NAMESPACE" >/dev/null 2>&1; then
+            echo "ACR secret already exists in $NAMESPACE, deleting and recreating..."
+            kubectl delete secret acr-secret -n "$NAMESPACE"
+          fi
+          
+          # Create docker-registry secret
+          kubectl create secret docker-registry acr-secret \
+            --namespace "$NAMESPACE" \
+            --docker-server="$ACR_LOGIN_SERVER" \
+            --docker-username="$ACR_USERNAME" \
+            --docker-password="$ACR_PASSWORD"
+          
+          echo "ACR pull secret created in $NAMESPACE"
+
       - name: Setup Helm
         uses: azure/setup-helm@v3
         with:
