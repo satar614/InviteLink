@@ -25,9 +25,6 @@ provider "kubernetes" {
 
 provider "helm" {
   kubernetes {
-    skip_credentials_validation = true
-    skip_metadata_api_check     = true
-
     host = try(azurerm_kubernetes_cluster.aks.kube_config[0].host, "https://kubernetes.default.svc")
     
     client_certificate = try(
