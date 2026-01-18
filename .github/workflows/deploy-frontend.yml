@@ -4,6 +4,7 @@ run-name: Build & Push Frontend - ${{ github.event.pull_request.title || github.
 on:
   push:
   pull_request:
+  workflow_call:
   workflow_dispatch:
     inputs:
       tag_suffix:
