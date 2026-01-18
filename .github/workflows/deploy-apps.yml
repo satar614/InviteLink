@@ -66,6 +66,10 @@ jobs:
       - name: Determine namespace and tag
         id: setup
         run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "PR number: ${{ github.event.pull_request.number }}"
+          
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             NAMESPACE="pr-${{ github.event.pull_request.number }}"
             TAG_SUFFIX="pr-${{ github.event.pull_request.number }}"
@@ -73,6 +77,9 @@ jobs:
             NAMESPACE="main"
             TAG_SUFFIX="main"
           fi
+          
+          echo "Determined namespace: $NAMESPACE"
+          echo "Determined tag_suffix: $TAG_SUFFIX"
           echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
           echo "tag_suffix=${TAG_SUFFIX}" >> $GITHUB_OUTPUT
 
