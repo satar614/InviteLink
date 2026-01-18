@@ -50,8 +50,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
 # Helm Release - Backend
 resource "helm_release" "backend" {
   name       = "invitelink-backend"
-  repository = "oci://${azurerm_container_registry.acr.login_server}/helm"
-  chart      = "backend"
+  chart      = "${path.module}/../k8s/charts/backend"
   namespace  = "default"
 
   values = [
@@ -64,8 +63,7 @@ resource "helm_release" "backend" {
 # Helm Release - Frontend
 resource "helm_release" "frontend" {
   name       = "invitelink-frontend"
-  repository = "oci://${azurerm_container_registry.acr.login_server}/helm"
-  chart      = "frontend"
+  chart      = "${path.module}/../k8s/charts/frontend"
   namespace  = "default"
 
   values = [

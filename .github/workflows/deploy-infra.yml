@@ -135,7 +135,7 @@ jobs:
           
           terraform plan \
             -input=false \
-            -refresh=false \
+            -refresh=true \
             -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
             -var="acr_name=invitelinkacre9c72f7a" \
             -var="resource_group_name=invitelink-rg" \
@@ -148,7 +148,7 @@ jobs:
         #   (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
         #   (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
         working-directory: ./infra
-        run: terraform apply -input=false -refresh=false -auto-approve tfplan
+        run: terraform apply -input=false -refresh=true -auto-approve tfplan
 
       - name: Terraform Destroy
         if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
