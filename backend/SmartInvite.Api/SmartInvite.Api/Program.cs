@@ -1,6 +1,7 @@
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+// Updated: 2026-01-18
 builder.Services.AddHealthChecks();
 
 builder.Services.AddControllers();
