@@ -53,10 +53,6 @@ jobs:
           npm run test -- --coverage --watchAll=false
 
       - name: Azure Login
-        if: |
-          github.ref == 'refs/heads/main' ||
-          github.event_name == 'workflow_dispatch' ||
-          github.event_name == 'workflow_call'
         uses: azure/login@v1
         with:
           creds: |
@@ -69,10 +65,6 @@ jobs:
 
       - name: Fetch ACR credentials
         id: acr
-        if: |
-          github.ref == 'refs/heads/main' ||
-          github.event_name == 'workflow_dispatch' ||
-          github.event_name == 'workflow_call'
         run: |
           ACR_LOGIN_SERVER="invitelinkacre9c72f7a.azurecr.io"
           ACR_NAME="invitelinkacre9c72f7a"
