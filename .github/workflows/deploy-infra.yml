@@ -118,8 +118,8 @@ jobs:
             -input=false \
             -var="subscription_id=$ARM_SUBSCRIPTION_ID" \
             -var="acr_name=invitelinkacre9c72f7a" \
-            -var="resource_group_name=${{ inputs.resource_group || 'invitelink-rg' }}" \
-            -var="location=${{ inputs.location || 'eastus' }}" \
+            -var="resource_group_name=invitelink-rg" \
+            -var="location=uksouth" \
             -out=tfplan
 
       - name: Terraform Apply
