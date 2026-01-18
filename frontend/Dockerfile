@@ -17,10 +17,6 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/server.js ./
-COPY --from=build /app/dist ./dist || true
-COPY --from=build /app/public ./public || true
 
 EXPOSE 3000
-ENV NODE_ENV=production
-
-CMD ["npm", "run", "server"]
+ENV NODE_ENV=productionCMD ["npm", "run", "server"]
