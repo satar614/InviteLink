@@ -1,0 +1,169 @@
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        required: true
+        type: string
+        description: 'Component to build (backend or frontend)'
+      namespace:
+        required: true
+        type: string
+        description: 'Target namespace (main or pr-*)'
+      push_image:
+        required: false
+        type: boolean
+        default: false
+        description: 'Whether to push image to registry'
+    outputs:
+      image_tag:
+        value: ${{ jobs.build.outputs.image_tag }}
+        description: 'Docker image tag'
+      image_uri:
+        value: ${{ jobs.build.outputs.image_uri }}
+        description: 'Full Docker image URI'
+
+env:
+  REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
+  REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.setup.outputs.image_tag }}
+      image_uri: ${{ steps.setup.outputs.image_uri }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Backend Build
+      - name: Setup .NET
+        if: inputs.component == 'backend'
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore backend dependencies
+        if: inputs.component == 'backend'
+        working-directory: ./backend/SmartInvite.Api/SmartInvite.Api
+        run: dotnet restore
+
+      - name: Build backend
+        if: inputs.component == 'backend'
+        working-directory: ./backend/SmartInvite.Api/SmartInvite.Api
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run backend unit tests
+        if: inputs.component == 'backend'
+        working-directory: ./backend/SmartInvite.Api.Tests
+        run: dotnet test --configuration Release --no-build --logger "trx" --results-directory "../../test-results"
+
+      # Frontend Build
+      - name: Setup Node.js
+        if: inputs.component == 'frontend'
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install frontend dependencies
+        if: inputs.component == 'frontend'
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Run frontend unit tests
+        if: inputs.component == 'frontend'
+        working-directory: ./frontend
+        run: npm run test -- --coverage --watchAll=false
+
+      - name: Build frontend
+        if: inputs.component == 'frontend'
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Run E2E tests
+        if: inputs.component == 'frontend'
+        working-directory: ./tests
+        run: |
+          npm install
+          npm test
+        env:
+          APP_URL: http://localhost:3000
+        continue-on-error: true
+
+      # Setup image details
+      - name: Setup image details
+        id: setup
+        run: |
+          if [[ "${{ inputs.component }}" == "backend" ]]; then
+            IMAGE_NAME="smartinvite-api"
+            DOCKERFILE_PATH="./backend/SmartInvite.Api/SmartInvite.Api/Dockerfile"
+            BUILD_CONTEXT="./backend/SmartInvite.Api/SmartInvite.Api"
+          else
+            IMAGE_NAME="invitelink-frontend"
+            DOCKERFILE_PATH="./frontend/Dockerfile"
+            BUILD_CONTEXT="./frontend"
+          fi
+          
+          IMAGE_TAG="${{ inputs.namespace }}-${{ github.sha }}"
+          IMAGE_URI="${{ env.REGISTRY_LOGIN_SERVER }}/${IMAGE_NAME}:${IMAGE_TAG}"
+          
+          echo "image_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "dockerfile_path=${DOCKERFILE_PATH}" >> $GITHUB_OUTPUT
+          echo "build_context=${BUILD_CONTEXT}" >> $GITHUB_OUTPUT
+
+      # Upload test artifacts
+      - name: Upload backend test results
+        if: inputs.component == 'backend' && always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-test-results-${{ github.run_number }}
+          path: test-results/
+          retention-days: 30
+
+      - name: Upload frontend test results
+        if: inputs.component == 'frontend' && always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-test-results-${{ github.run_number }}
+          path: |
+            frontend/coverage/
+            tests/reports/
+          retention-days: 30
+
+      # Docker build and push (only if requested)
+      - name: Azure Login
+        if: inputs.push_image == true
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Docker login
+        if: inputs.push_image == true
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ env.REGISTRY_LOGIN_SERVER }}
+          username: ${{ env.REGISTRY_USERNAME }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+
+      - name: Build Docker image
+        if: inputs.push_image == true
+        run: |
+          docker build \
+            -f ${{ steps.setup.outputs.dockerfile_path }} \
+            -t ${{ steps.setup.outputs.image_uri }} \
+            -t ${{ env.REGISTRY_LOGIN_SERVER }}/${{ steps.setup.outputs.image_name }}:latest \
+            ${{ steps.setup.outputs.build_context }}
+
+      - name: Push Docker image
+        if: inputs.push_image == true
+        run: |
+          docker push ${{ steps.setup.outputs.image_uri }}
+          docker push ${{ env.REGISTRY_LOGIN_SERVER }}/${{ steps.setup.outputs.image_name }}:latest

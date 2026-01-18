@@ -1,0 +1,162 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: 'Namespace to deploy to'
+        required: false
+
+env:
+  REGISTRY_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  REGISTRY_USERNAME: ${{ secrets.ACR_USERNAME }}
+  REGISTRY_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+  AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
+  AKS_RESOURCE_GROUP: ${{ secrets.AKS_RESOURCE_GROUP }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine namespace
+        id: namespace
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.namespace }}" ]]; then
+            NAMESPACE="${{ inputs.namespace }}"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            NAMESPACE="pr-${{ github.event.pull_request.number }}"
+          else
+            NAMESPACE="main"
+          fi
+          IMAGE_TAG="${NAMESPACE}-${{ github.sha }}"
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          
+      - name: Check if frontend changes
+        id: changes
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # On PR opened, always deploy. On updates, check for frontend changes
+            if [[ "${{ github.event.action }}" == "opened" ]]; then
+              echo "should_deploy=true" >> $GITHUB_OUTPUT
+              echo "reason=pr_opened" >> $GITHUB_OUTPUT
+            else
+              # Check if frontend files changed
+              git fetch origin ${{ github.base_ref }}
+              if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q '^frontend/'; then
+                echo "should_deploy=true" >> $GITHUB_OUTPUT
+                echo "reason=frontend_changes" >> $GITHUB_OUTPUT
+              else
+                echo "should_deploy=false" >> $GITHUB_OUTPUT
+                echo "reason=no_frontend_changes" >> $GITHUB_OUTPUT
+              fi
+            fi
+          else
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "reason=main_branch" >> $GITHUB_OUTPUT
+          fi
+
+      # Build frontend
+      - name: Setup Node.js
+        if: steps.changes.outputs.should_deploy == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build and test frontend
+        if: steps.changes.outputs.should_deploy == 'true'
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run test -- --coverage --watchAll=false
+
+      # Push to ACR
+      - name: Azure Login
+        if: steps.changes.outputs.should_deploy == 'true'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and push Docker image
+        if: steps.changes.outputs.should_deploy == 'true'
+        run: |
+          echo ${{ env.REGISTRY_PASSWORD }} | docker login ${{ env.REGISTRY_LOGIN_SERVER }} -u ${{ env.REGISTRY_USERNAME }} --password-stdin
+          docker build -f ./frontend/Dockerfile \
+            -t ${{ env.REGISTRY_LOGIN_SERVER }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }} \
+            ./frontend
+          docker push ${{ env.REGISTRY_LOGIN_SERVER }}/invitelink-frontend:${{ steps.namespace.outputs.image_tag }}
+
+      # Deploy with Helm
+      - name: Get AKS credentials
+        if: steps.changes.outputs.should_deploy == 'true'
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+
+      - name: Setup Helm
+        if: steps.changes.outputs.should_deploy == 'true'
+        uses: azure/setup-helm@v3
+
+      - name: Deploy with Helm
+        if: steps.changes.outputs.should_deploy == 'true'
+        id: deploy
+        run: |
+          NAMESPACE="${{ steps.namespace.outputs.namespace }}"
+          kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+          
+          helm upgrade --install invitelink-frontend ./k8s/charts/frontend \
+            --namespace ${NAMESPACE} \
+            --set image.repository=${{ env.REGISTRY_LOGIN_SERVER }}/invitelink-frontend \
+            --set image.tag=${{ steps.namespace.outputs.image_tag }} \
+            --set namespace=${NAMESPACE} \
+            --wait --timeout 5m
+          
+          # Get frontend URL
+          FRONTEND_IP=$(kubectl get svc invitelink-frontend -n ${NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "frontend_url=http://${FRONTEND_IP}" >> $GITHUB_OUTPUT
+
+      # Comment on PR with deployment info
+      - name: Comment deployment info on PR
+        if: github.event_name == 'pull_request' && steps.changes.outputs.should_deploy == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const namespace = '${{ steps.namespace.outputs.namespace }}';
+            const frontendUrl = '${{ steps.deploy.outputs.frontend_url }}';
+            const reason = '${{ steps.changes.outputs.reason }}';
+            
+            const comment = `## 🚀 Frontend Deployed
+            
+            **Namespace:** \`${namespace}\`
+            **Frontend URL:** ${frontendUrl}
+            **Reason:** ${reason}
+            
+            _Deployment completed at ${new Date().toISOString()}_`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+      
+      - name: Skip deployment message
+        if: steps.changes.outputs.should_deploy == 'false'
+        run: |
+          echo "⏭️ Skipping frontend deployment - no frontend changes detected"
+          echo "Frontend will continue using existing deployment in namespace: ${{ steps.namespace.outputs.namespace }}"

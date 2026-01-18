@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: invitelink-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: "azure/application-gateway"
+spec:
+  rules:
+    - host: "invitelink.example.com"
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: smartinvite-api
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: invitelink-frontend
+                port:
+                  number: 80

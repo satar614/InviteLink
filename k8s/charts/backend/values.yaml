@@ -1,0 +1,6 @@
+image:
+  repository: myacr.azurecr.io/smartinvite-api
+  tag: latest
+
+replicas: 2
+namespace: main

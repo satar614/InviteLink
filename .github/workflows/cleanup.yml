@@ -1,0 +1,150 @@
+name: Cleanup Namespace
+
+on:
+  pull_request:
+    types: [ closed ]
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: 'Namespace to clean up (leave empty for current PR, or specify pr-* or main)'
+        required: false
+        type: string
+
+env:
+  AKS_CLUSTER_NAME: ${{ secrets.AKS_CLUSTER_NAME }}
+  AKS_RESOURCE_GROUP: ${{ secrets.AKS_RESOURCE_GROUP }}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine namespace to cleanup
+        id: namespace
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            NAMESPACE="pr-${{ github.event.pull_request.number }}"
+            CLEANUP_REASON="PR #${{ github.event.pull_request.number }} closed"
+          elif [[ -n "${{ github.event.inputs.namespace }}" ]]; then
+            NAMESPACE="${{ github.event.inputs.namespace }}"
+            CLEANUP_REASON="Manual cleanup triggered"
+          else
+            echo "❌ No namespace specified and not a PR close event"
+            exit 1
+          fi
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "reason=${CLEANUP_REASON}" >> $GITHUB_OUTPUT
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --name ${{ env.AKS_CLUSTER_NAME }} \
+            --overwrite-existing
+
+      - name: Check namespace exists
+        id: check
+        run: |
+          if kubectl get namespace ${{ steps.namespace.outputs.namespace }} >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get resources in namespace
+        if: steps.check.outputs.exists == 'true'
+        id: resources
+        run: |
+          echo "## Resources to be deleted:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Deployments" >> $GITHUB_STEP_SUMMARY
+          kubectl get deployments -n ${{ steps.namespace.outputs.namespace }} || echo "None" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Services" >> $GITHUB_STEP_SUMMARY
+          kubectl get services -n ${{ steps.namespace.outputs.namespace }} || echo "None" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Pods" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n ${{ steps.namespace.outputs.namespace }} || echo "None" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### PersistentVolumeClaims" >> $GITHUB_STEP_SUMMARY
+          kubectl get pvc -n ${{ steps.namespace.outputs.namespace }} || echo "None" >> $GITHUB_STEP_SUMMARY
+
+      - name: Delete all resources in namespace
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          echo "Deleting all resources in namespace: ${{ steps.namespace.outputs.namespace }}"
+          
+          # Delete deployments (triggers pod cleanup)
+          kubectl delete deployments -n ${{ steps.namespace.outputs.namespace }} --all || true
+          
+          # Delete services (removes load balancers)
+          kubectl delete services -n ${{ steps.namespace.outputs.namespace }} --all || true
+          
+          # Delete persistent volume claims
+          kubectl delete pvc -n ${{ steps.namespace.outputs.namespace }} --all || true
+          
+          # Delete any remaining pods
+          kubectl delete pods -n ${{ steps.namespace.outputs.namespace }} --all || true
+          
+          # Delete secrets and configmaps
+          kubectl delete secrets,configmaps -n ${{ steps.namespace.outputs.namespace }} --all || true
+          
+          echo "✅ Resources deleted"
+
+      - name: Wait for resources to be cleaned up
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          echo "Waiting for resources to be cleaned up..."
+          sleep 10
+          
+          TIMEOUT=60
+          ELAPSED=0
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            POD_COUNT=$(kubectl get pods -n ${{ steps.namespace.outputs.namespace }} --no-headers 2>/dev/null | wc -l)
+            if [ "$POD_COUNT" -eq 0 ]; then
+              echo "✅ All pods cleaned up"
+              break
+            fi
+            echo "Waiting... ($POD_COUNT pods remaining)"
+            sleep 5
+            ELAPSED=$((ELAPSED + 5))
+          done
+
+      - name: Delete namespace
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          kubectl delete namespace ${{ steps.namespace.outputs.namespace }} --ignore-not-found=true
+          echo "✅ Namespace deleted: ${{ steps.namespace.outputs.namespace }}"
+
+      - name: Verify namespace deletion
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          sleep 5
+          if kubectl get namespace ${{ steps.namespace.outputs.namespace }} >/dev/null 2>&1; then
+            echo "⚠️ Namespace still exists (may be in terminating state)"
+          else
+            echo "✅ Namespace successfully deleted"
+          fi
+
+      - name: Namespace doesn't exist
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          echo "ℹ️ Namespace ${{ steps.namespace.outputs.namespace }} does not exist, nothing to clean up"
+
+      - name: Post cleanup summary
+        if: always()
+        run: |
+          echo "## 🧹 Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace**: \`${{ steps.namespace.outputs.namespace }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason**: ${{ steps.namespace.outputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status**: ✅ Cleaned up" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
