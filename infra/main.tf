@@ -38,12 +38,9 @@ resource "azurerm_kubernetes_cluster" "aks" {
   kubernetes_version  = "1.28"
 
   default_node_pool {
-    name                = "default"
-    node_count          = 2
-    vm_size             = "Standard_D2s_v3"
-    os_disk_size_gb     = 30
-    max_pods            = 110
-    availability_zones  = ["1", "2", "3"]
+    name       = "default"
+    node_count = 1
+    vm_size    = "Standard_B2s"
   }
 
   identity {
@@ -51,10 +48,7 @@ resource "azurerm_kubernetes_cluster" "aks" {
   }
 
   network_profile {
-    network_plugin    = "azure"
-    service_cidr      = "10.0.0.0/16"
-    dns_service_ip    = "10.0.0.10"
-    docker_bridge_cidr = "172.17.0.1/16"
+    network_plugin = "azure"
   }
 }
 
@@ -64,7 +58,7 @@ resource "helm_release" "backend" {
   repository = "oci://${azurerm_container_registry.acr.login_server}/helm"
   chart      = "backend"
   namespace  = "default"
-  
+
   values = [
     file("${path.module}/../k8s/charts/backend/values.yaml")
   ]
@@ -78,7 +72,7 @@ resource "helm_release" "frontend" {
   repository = "oci://${azurerm_container_registry.acr.login_server}/helm"
   chart      = "frontend"
   namespace  = "default"
-  
+
   values = [
     file("${path.module}/../k8s/charts/frontend/values.yaml")
   ]
