@@ -23,10 +23,6 @@ resource "azurerm_container_registry" "acr" {
   location            = azurerm_resource_group.hub_rg.location
   sku                 = "Basic"
   admin_enabled       = true
-
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 # AKS Cluster
