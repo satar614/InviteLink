@@ -22,13 +22,13 @@ jobs:
         run: |
           echo "Checking for running backend/frontend builds..."
           
-          # Wait for backend builds
+          # Wait for backend builds (deploy-backend.yml)
           while true; do
             BACKEND_RUNS=$(gh run list \
               --repo ${{ github.repository }} \
-              --workflow "Build and Push to ACR" \
-              --json status,databaseId,displayTitle \
-              --jq '[.[] | select(.displayTitle | contains("Backend")) | select(.status == "in_progress" or .status == "queued")] | length')
+              --workflow deploy-backend.yml \
+              --json status \
+              --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
             
             if [[ "$BACKEND_RUNS" -eq 0 ]]; then
               echo "No backend builds running"
@@ -38,13 +38,13 @@ jobs:
             sleep 10
           done
           
-          # Wait for frontend builds
+          # Wait for frontend builds (deploy-frontend.yml)
           while true; do
             FRONTEND_RUNS=$(gh run list \
               --repo ${{ github.repository }} \
-              --workflow "Build and Push to ACR" \
-              --json status,databaseId,displayTitle \
-              --jq '[.[] | select(.displayTitle | contains("Frontend")) | select(.status == "in_progress" or .status == "queued")] | length')
+              --workflow deploy-frontend.yml \
+              --json status \
+              --jq '[.[] | select(.status == "in_progress" or .status == "queued")] | length')
             
             if [[ "$FRONTEND_RUNS" -eq 0 ]]; then
               echo "No frontend builds running"
