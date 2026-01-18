@@ -97,9 +97,21 @@ if [ -z "$REGISTRY_NAME" ]; then
     REGISTRY_NAME="${REGISTRY_NAME:-invitelinkregistry}"
 fi
 
+# Get AKS Cluster Name
+if [ -z "$AKS_CLUSTER_NAME" ]; then
+    read -p "Enter AKS cluster name [invitelink-aks]: " AKS_CLUSTER_NAME
+    AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-invitelink-aks}"
+fi
+
 # Validate registry name (must be lowercase alphanumeric only)
 if ! [[ "$REGISTRY_NAME" =~ ^[a-z0-9]+$ ]]; then
     print_error "Registry name must contain only lowercase alphanumeric characters"
+    exit 1
+fi
+
+# Validate cluster name
+if ! [[ "$AKS_CLUSTER_NAME" =~ ^[a-z0-9-]+$ ]]; then
+    print_error "Cluster name must contain only lowercase alphanumeric characters and hyphens"
     exit 1
 fi
 
@@ -258,6 +270,7 @@ echo "  Resource Group: $RESOURCE_GROUP"
 echo "  Storage Account: $STORAGE_ACCOUNT"
 echo "  Container Registry: $REGISTRY_NAME"
 echo "  Registry Server: $ACR_LOGIN_SERVER"
+echo "  AKS Cluster Name: $AKS_CLUSTER_NAME"
 echo ""
 echo -e "${BLUE}GitHub Secrets Set:${NC}"
 echo "  • AZURE_CLIENT_SECRET (Client Secret)"
