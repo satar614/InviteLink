@@ -68,18 +68,24 @@ jobs:
 
       - name: Deploy backend with Helm
         run: |
+          IMAGE_URI="${{ needs.build-backend.outputs.image_uri }}"
+          IMAGE_REPO="${IMAGE_URI%:*}"
+          IMAGE_TAG="${IMAGE_URI##*:}"
           helm upgrade --install smartinvite-api ./k8s/charts/backend \
             --namespace ${{ needs.prepare.outputs.namespace }} \
-            --set image.repository=$(echo ${{ needs.build-backend.outputs.image_uri }} | cut -d: -f1) \
-            --set image.tag=$(echo ${{ needs.build-backend.outputs.image_uri }} | cut -d: -f2) \
+            --set image.repository="$IMAGE_REPO" \
+            --set image.tag="$IMAGE_TAG" \
             --wait --timeout 5m
 
       - name: Deploy frontend with Helm
         run: |
+          IMAGE_URI="${{ needs.build-frontend.outputs.image_uri }}"
+          IMAGE_REPO="${IMAGE_URI%:*}"
+          IMAGE_TAG="${IMAGE_URI##*:}"
           helm upgrade --install invitelink-frontend ./k8s/charts/frontend \
             --namespace ${{ needs.prepare.outputs.namespace }} \
-            --set image.repository=$(echo ${{ needs.build-frontend.outputs.image_uri }} | cut -d: -f1) \
-            --set image.tag=$(echo ${{ needs.build-frontend.outputs.image_uri }} | cut -d: -f2) \
+            --set image.repository="$IMAGE_REPO" \
+            --set image.tag="$IMAGE_TAG" \
             --wait --timeout 5m
 
       - name: Get deployment status
