@@ -14,30 +14,22 @@ This guide explains how to set up Azure credentials for GitHub Actions workflows
 The setup script creates and configures:
 
 1. **Service Principal** - For GitHub Actions to authenticate with Azure
-2. **GitHub Secrets** - Stores credentials securely in the repository
-3. **AKS Information** - Cluster name and resource group for Kubernetes operations
+2. **GitHub Secret** - Stores only the client secret (not sensitive identifiers)
+
+Note: Client ID, Tenant ID, and Subscription ID are hardcoded in the workflows as they are not sensitive information. Only the client secret is stored as a GitHub secret.
 
 ## Required GitHub Secrets
 
 | Secret Name | Purpose | Example |
 |---|---|---|
-| `AZURE_CREDENTIALS` | JSON credentials for `azure/login@v1` | See below |
-| `AZURE_SUBSCRIPTION_ID` | Azure subscription ID | `26105aab-ded4-4e66-a408-309b2e23092c` |
-| `AZURE_CLIENT_ID` | Service principal application ID | UUID |
-| `AZURE_TENANT_ID` | Azure tenant ID | UUID |
-| `AKS_CLUSTER_NAME` | Kubernetes cluster name | `my-aks-cluster` |
-| `AKS_RESOURCE_GROUP` | Azure resource group | `my-resource-group` |
+| `AZURE_CLIENT_SECRET` | Service principal password | `secretpassword123` |
 
-## AZURE_CREDENTIALS Format
 
-```json
-{
-  "clientId": "00000000-0000-0000-0000-000000000000",
-  "clientSecret": "your-client-secret",
-  "subscriptionId": "26105aab-ded4-4e66-a408-309b2e23092c",
-  "tenantId": "00000000-0000-0000-0000-000000000000"
-}
-```
+## GitHub Secret Required
+
+| Secret Name | Value |
+|---|---|
+| `AZURE_CLIENT_SECRET` | Your service principal password (from credential reset) |
 
 ## Setup Steps
 
@@ -97,21 +89,17 @@ Save the output - you'll need the `clientId` and `clientSecret`.
 Using GitHub CLI:
 
 ```bash
-# Set AZURE_CREDENTIALS
-gh secret set AZURE_CREDENTIALS --repo saddeaden1/InviteLink < credentials.json
-
-# Set individual secrets
-gh secret set AZURE_SUBSCRIPTION_ID --repo saddeaden1/InviteLink
-gh secret set AZURE_CLIENT_ID --repo saddeaden1/InviteLink
-gh secret set AZURE_TENANT_ID --repo saddeaden1/InviteLink
-gh secret set AKS_CLUSTER_NAME --repo saddeaden1/InviteLink
-gh secret set AKS_RESOURCE_GROUP --repo saddeaden1/InviteLink
+# Set GitHub secret for client secret only
+gh secret set AZURE_CLIENT_SECRET --repo saddeaden1/InviteLink
 ```
+
+When prompted, paste the client secret (password) from the service principal credentials.
 
 Or use the GitHub web interface:
 1. Go to https://github.com/saddeaden1/InviteLink/settings/secrets/actions
 2. Click "New repository secret"
-3. Add each secret with the corresponding value
+3. Name: `AZURE_CLIENT_SECRET`
+4. Value: (paste the client secret/password from credentials)
 
 ## Verify Setup
 
@@ -123,12 +111,7 @@ gh secret list --repo saddeaden1/InviteLink
 
 Expected output:
 ```
-AZURE_CREDENTIALS
-AZURE_SUBSCRIPTION_ID
-AZURE_CLIENT_ID
-AZURE_TENANT_ID
-AKS_CLUSTER_NAME
-AKS_RESOURCE_GROUP
+AZURE_CLIENT_SECRET
 ```
 
 ### Test Workflow

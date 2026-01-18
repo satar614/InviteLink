@@ -92,34 +92,23 @@ EOF
 echo "Setting GitHub secrets..."
 echo ""
 
-# Set AZURE_CREDENTIALS
-echo "Setting AZURE_CREDENTIALS..."
-echo "$AZURE_CREDENTIALS" | gh secret set AZURE_CREDENTIALS --repo "$REPO"
-echo "✅ AZURE_CREDENTIALS set"
-
-# Set individual credentials
-echo "Setting AZURE_SUBSCRIPTION_ID..."
-echo "$SUBSCRIPTION_ID" | gh secret set AZURE_SUBSCRIPTION_ID --repo "$REPO"
-echo "✅ AZURE_SUBSCRIPTION_ID set"
-
-echo "Setting AZURE_CLIENT_ID..."
-echo "$CLIENT_ID" | gh secret set AZURE_CLIENT_ID --repo "$REPO"
-echo "✅ AZURE_CLIENT_ID set"
-
-echo "Setting AZURE_TENANT_ID..."
-echo "$TENANT_ID" | gh secret set AZURE_TENANT_ID --repo "$REPO"
-echo "✅ AZURE_TENANT_ID set"
+# Set AZURE_CLIENT_SECRET only
+echo "Setting AZURE_CLIENT_SECRET..."
+echo "$CLIENT_SECRET" | gh secret set AZURE_CLIENT_SECRET --repo "$REPO"
+echo "✅ AZURE_CLIENT_SECRET set"
 
 echo ""
 echo "========================================="
-echo "✅ Azure secrets configured successfully!"
+echo "✅ Azure setup complete!"
 echo "========================================="
 echo ""
-echo "The following secrets have been set in GitHub:"
-echo "  • AZURE_CREDENTIALS (for azure/login action)"
-echo "  • AZURE_SUBSCRIPTION_ID"
-echo "  • AZURE_CLIENT_ID"
-echo "  • AZURE_TENANT_ID"
+echo "Only one secret is stored in GitHub:"
+echo "  • AZURE_CLIENT_SECRET"
+echo ""
+echo "The following values are hardcoded in workflows:"
+echo "  • Client ID: $CLIENT_ID"
+echo "  • Tenant ID: $TENANT_ID"
+echo "  • Subscription ID: $SUBSCRIPTION_ID"
 echo ""
 echo "Your workflows can now authenticate with Azure."
 echo ""
