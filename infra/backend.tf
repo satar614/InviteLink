@@ -1,8 +1,8 @@
 terraform {
   backend "azurerm" {
-    resource_group_name  = "smart-invite-rg"
-    storage_account_name = "smartinviteblobnikah"
+    resource_group_name  = "terraform-state-rg"
+    storage_account_name = "tfstate8752688"
     container_name       = "tfstate"
-    key                  = "prod.terraform.tfstate"
+    key                  = "invitelink.tfstate"
   }
 }
