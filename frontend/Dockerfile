@@ -19,4 +19,5 @@ COPY --from=build /app/package*.json ./
 COPY --from=build /app/server.js ./
 
 EXPOSE 3000
-ENV NODE_ENV=productionCMD ["npm", "run", "server"]
+ENV NODE_ENV=production
+CMD ["npm", "run", "server"]
