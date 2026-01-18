@@ -2,10 +2,6 @@ name: Build and Push to ACR
 run-name: Build and Push to ACR (Backend) - ${{ github.event.pull_request.title || github.ref_name }}
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
   workflow_call:
   workflow_dispatch:
     inputs:
