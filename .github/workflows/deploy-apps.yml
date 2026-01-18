@@ -206,6 +206,23 @@ jobs:
         with:
           token: ${{ github.token }}
 
+      - name: Clean up stuck Helm releases
+        run: |
+          NAMESPACE="${{ needs.prepare.outputs.namespace }}"
+          
+          # Check for pending-install or pending-upgrade releases
+          echo "Checking for stuck Helm releases in $NAMESPACE..."
+          
+          if helm list -n "$NAMESPACE" --pending 2>/dev/null | grep -q .; then
+            echo "Found pending Helm releases, rolling back..."
+            helm list -n "$NAMESPACE" --pending -o json | jq -r '.[].name' | while read release; do
+              echo "Rolling back $release..."
+              helm rollback "$release" -n "$NAMESPACE" || helm uninstall "$release" -n "$NAMESPACE" || true
+            done
+          else
+            echo "No stuck releases found"
+          fi
+
       - name: Deploy backend with Helm
         run: |
           IMAGE="${{ steps.backend_image.outputs.image }}"
