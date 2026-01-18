@@ -3,7 +3,9 @@ run-name: Deploy Applications - ${{ github.event.pull_request.title || github.re
 
 on:
   push:
-  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 concurrency:
   group: deploy-apps

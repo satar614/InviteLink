@@ -3,6 +3,8 @@ run-name: Build and Push to ACR (Frontend) - ${{ github.event.pull_request.title
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_call:
   workflow_dispatch:
@@ -79,6 +81,10 @@ jobs:
 
       - name: Build and push Docker image
         id: image
+        if: |
+          github.ref == 'refs/heads/main' ||
+          github.event_name == 'workflow_dispatch' ||
+          github.event_name == 'workflow_call'
         run: |
           LOGIN_SERVER="${{ steps.acr.outputs.login_server }}"
           TAG="${{ steps.tag.outputs.tag }}"
@@ -99,8 +105,17 @@ jobs:
           
           echo "uri=${IMAGE_TAG}" >> $GITHUB_OUTPUT
 
+      - name: Build Docker image (PR)
+        id: image_pr
+        if: |
+          github.event_name == 'pull_request'
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Built frontend image with tag: $TAG (not pushed to ACR on PRs)"
+
       - name: Push summary
         run: |
           echo "## 🔨 Frontend Build & Push Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image**: \`${{ steps.image.outputs.uri }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ steps.image.outputs.uri || steps.image_pr.outputs.tag }}\`" >> $GITHUB_STEP_SUMMARY
