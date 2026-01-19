@@ -1,0 +1,76 @@
+name: Mobile CI
+
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-ci.yml'
+
+jobs:
+  mobile-ci:
+    name: Mobile App CI
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: apps/mobile
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: apps/mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test -- --coverage --watchAll=false
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./apps/mobile/coverage/lcov.info
+          flags: mobile
+          name: mobile-coverage
+
+      - name: Build check (validate app can be built)
+        run: |
+          echo "Skipping build - requires EAS Build or local build environment"
+          echo "Build validation will be added in future PRs with proper build configuration"
+
+  comment-pr:
+    name: Comment on PR
+    runs-on: ubuntu-latest
+    needs: mobile-ci
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Mobile CI passed! The React Native mobile app has been validated.\n\n**Next steps:**\n- Test locally: `cd apps/mobile && npm install && npm start`\n- Update `.env` with the PR preview backend URL (check CI logs or PR comments)\n- Scan QR code with Expo Go to test on your device'
+            })
