@@ -1,0 +1,14 @@
+# Backend build artifacts
+backend/**/bin/
+backend/**/obj/
+
+# IDE and editor files
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+
+# OS files
+.DS_Store
+Thumbs.db
